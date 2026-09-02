@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ТВ Витрина</string>
+    <string name="channel_name">Сервер трансляции</string>
+    <string name="notif_title">ТВ Витрина работает</string>
+</resources>

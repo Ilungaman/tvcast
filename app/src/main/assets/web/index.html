@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0e11">
+<title>ТВ Витрина</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot" id="dot"></span>
+    <span>ТВ Витрина</span>
+  </div>
+  <div class="sub" id="storage">—</div>
+</header>
+
+<main>
+
+  <section class="card pick">
+    <label class="btn primary">
+      Фото и видео
+      <input id="pickMedia" type="file" accept="image/*,video/*" multiple>
+    </label>
+    <label class="btn ghost">
+      Файлы
+      <input id="pickFiles" type="file" multiple>
+    </label>
+    <p class="hint">Выберите файлы — они уйдут на телевизор и сразу появятся на экране.</p>
+  </section>
+
+  <section class="card queue" id="queueCard" hidden>
+    <div class="card-title">Загрузка</div>
+    <div id="queue"></div>
+    <p class="hint">Не блокируйте экран телефона, пока идёт загрузка.</p>
+  </section>
+
+  <section class="card now" id="nowCard" hidden>
+    <div class="now-head">
+      <img id="nowThumb" alt="">
+      <div class="now-meta">
+        <div class="now-name" id="nowName">—</div>
+        <div class="now-sub" id="nowSub">—</div>
+      </div>
+    </div>
+
+    <div class="seek" id="seekWrap">
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <div class="times"><span id="tPos">0:00</span><span id="tDur">0:00</span></div>
+    </div>
+
+    <div class="controls">
+      <button class="ctl" data-act="prev" aria-label="Предыдущий">⏮</button>
+      <button class="ctl" data-act="back" aria-label="Назад 10 секунд">−10</button>
+      <button class="ctl big" id="playBtn" data-act="toggle" aria-label="Пуск или пауза">▶</button>
+      <button class="ctl" data-act="fwd" aria-label="Вперёд 10 секунд">+10</button>
+      <button class="ctl" data-act="next" aria-label="Следующий">⏭</button>
+    </div>
+
+    <div class="toggles">
+      <button class="chip" id="muteChip" data-act="mute">Звук вкл.</button>
+      <button class="chip" id="repeatChip" data-act="repeat">Повтор выкл.</button>
+      <button class="chip" data-act="stop">На заставку</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <button class="chip" id="slideChip" data-act="slideshow">Слайдшоу выкл.</button>
+      <label class="interval">
+        Пауза
+        <select id="interval">
+          <option value="3">3 с</option>
+          <option value="5">5 с</option>
+          <option value="6" selected>6 с</option>
+          <option value="10">10 с</option>
+          <option value="15">15 с</option>
+          <option value="30">30 с</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title row">
+      <span>На телевизоре</span>
+      <button class="chip danger" id="clearBtn">Очистить всё</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="hint" id="emptyHint">Пока пусто.</p>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

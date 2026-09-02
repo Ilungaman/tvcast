@@ -1,0 +1,50 @@
+name: Сборка APK
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать исходники
+        uses: actions/checkout@v4
+
+      - name: Установить JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Установить Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Установить Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Собрать APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Приложить APK к сборке
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVCast-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Опубликовать релиз с прямой ссылкой
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest app/build/outputs/apk/debug/*.apk \
+            --title "ТВ Витрина — свежая сборка" \
+            --notes "APK для Android TV. Скачайте app-debug.apk и установите на телевизор."
