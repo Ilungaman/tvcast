@@ -1,0 +1,3 @@
+[submodule "app/src/main/cpp/third_party/uxplay"]
+	path = app/src/main/cpp/third_party/uxplay
+	url = https://github.com/FDH2/UxPlay.git
