@@ -23,6 +23,13 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- Повтор экрана (AirPlay mirroring) -->
+    <SurfaceView
+        android:id="@+id/airplaySurface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <!-- Экран ожидания -->
     <LinearLayout
         android:id="@+id/idleView"

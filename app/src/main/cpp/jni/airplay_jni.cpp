@@ -8,10 +8,14 @@
  * adapted from) -- but targets our own raop_callbacks_t instead of
  * uxplay.cpp's GStreamer-based renderer.
  *
- * Phase 1 (this file): get pairing + the RTSP/RTP session working end to
- * end and prove it against a real iPhone -- video/audio frames are just
- * logged here, not decoded. Feeding decrypted frames into MediaCodec is a
- * separate, later step once pairing itself is confirmed working.
+ * Phase 1 confirmed pairing + the RTSP/RTP session against a real iPhone.
+ * Phase 2 (this file, now): video frames are forwarded to Kotlin's
+ * AirPlayBridge, which feeds them into a MediaCodec decoder onto a Surface.
+ * Audio is still not wired up.
+ *
+ * raop_callbacks_t fires on UxPlay's own internal worker threads, never on
+ * a thread already attached to the JVM, so every callback that needs to
+ * call back into Kotlin attaches via g_vm->AttachCurrentThread() first.
  */
 
 #include <jni.h>
@@ -28,6 +32,45 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+
+JavaVM *g_vm = nullptr;
+
+/* Attaches the calling (native) thread to the JVM if it isn't already.
+ * Callers must not detach -- UxPlay reuses a small pool of long-lived
+ * worker threads, so we attach once per thread and let them stay attached
+ * for the process lifetime rather than attach/detach on every callback. */
+JNIEnv *attachCurrentThread() {
+    JNIEnv *env = nullptr;
+    if (g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) {
+        return env;
+    }
+    if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+        return nullptr;
+    }
+    return env;
+}
+
+jclass g_bridgeClass = nullptr;
+jmethodID g_onVideoFrame = nullptr;
+jmethodID g_onMirrorStateChanged = nullptr;
+
+void ensureBridgeCached(JNIEnv *env) {
+    if (g_bridgeClass) return;
+    jclass local = env->FindClass("com/tvcast/receiver/airplay/AirPlayBridge");
+    if (!local) {
+        LOGE("AirPlayBridge class not found");
+        env->ExceptionClear();
+        return;
+    }
+    g_bridgeClass = (jclass) env->NewGlobalRef(local);
+    env->DeleteLocalRef(local);
+    g_onVideoFrame = env->GetStaticMethodID(g_bridgeClass, "onVideoFrame", "([BZJ)V");
+    g_onMirrorStateChanged = env->GetStaticMethodID(g_bridgeClass, "onMirrorStateChanged", "(Z)V");
+    if (!g_onVideoFrame || !g_onMirrorStateChanged) {
+        LOGE("AirPlayBridge methods not found");
+        env->ExceptionClear();
+    }
+}
 
 raop_t *g_raop = nullptr;
 dnssd_t *g_dnssd = nullptr;
@@ -53,16 +96,31 @@ void log_callback(void *cls, int level, const char *msg) {
     }
 }
 
-/* ---- raop_callbacks_t: phase-1 stubs, log-only ---- */
+/* ---- raop_callbacks_t ---- */
 
 void cb_audio_process(void *cls, raop_ntp_t *ntp, audio_decode_struct *data) {
+    // Not decoded yet -- only video is wired up to MediaCodec so far.
     (void) cls; (void) ntp;
     LOGI("audio frame: %d bytes, ct=%d", data->data_len, data->ct);
 }
 
 void cb_video_process(void *cls, raop_ntp_t *ntp, video_decode_struct *data) {
     (void) cls; (void) ntp;
-    LOGI("video frame: %d bytes, nal_count=%d, h265=%d", data->data_len, data->nal_count, data->is_h265);
+    JNIEnv *env = attachCurrentThread();
+    if (!env) return;
+    ensureBridgeCached(env);
+    if (!g_onVideoFrame) return;
+
+    jbyteArray arr = env->NewByteArray(data->data_len);
+    if (!arr) {
+        env->ExceptionClear();
+        return;
+    }
+    env->SetByteArrayRegion(arr, 0, data->data_len, reinterpret_cast<jbyte *>(data->data));
+    env->CallStaticVoidMethod(g_bridgeClass, g_onVideoFrame, arr,
+                               (jboolean) data->is_h265, (jlong) data->ntp_time_remote);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(arr);
 }
 
 void cb_video_pause(void *cls) { (void) cls; LOGI("video_pause"); }
@@ -92,7 +150,16 @@ void cb_video_report_size(void *cls, float *width_source, float *height_source, 
     (void) cls;
     LOGI("video_report_size source=%.0fx%.0f display=%.0fx%.0f", *width_source, *height_source, *width, *height);
 }
-void cb_mirror_video_running(void *cls, bool is_running) { (void) cls; LOGI("mirror_video_running=%d", is_running); }
+void cb_mirror_video_running(void *cls, bool is_running) {
+    (void) cls;
+    LOGI("mirror_video_running=%d", is_running);
+    JNIEnv *env = attachCurrentThread();
+    if (!env) return;
+    ensureBridgeCached(env);
+    if (!g_onMirrorStateChanged) return;
+    env->CallStaticVoidMethod(g_bridgeClass, g_onMirrorStateChanged, (jboolean) is_running);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
 void cb_report_client_request(void *cls, char *deviceid, char *model, char *name, bool *admit) {
     (void) cls;
     LOGI("client request: id=%s model=%s name=%s -> admitting", deviceid, model, name);
@@ -118,6 +185,11 @@ void cb_on_video_acquire_playback_info(void *cls, playback_info_t *playback_vide
 float cb_on_video_playlist_remove(void *cls) { (void) cls; return 0.0f; }
 
 } // namespace
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /* reserved */) {
+    g_vm = vm;
+    return JNI_VERSION_1_6;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_tvcast_receiver_airplay_AirPlayReceiver_nativeStart(

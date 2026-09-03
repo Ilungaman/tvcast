@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.SurfaceHolder
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.exifinterface.media.ExifInterface
@@ -15,6 +16,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import com.tvcast.receiver.airplay.AirPlayBridge
+import com.tvcast.receiver.airplay.AirPlayVideoRenderer
 import com.tvcast.receiver.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +35,9 @@ class MainActivity : AppCompatActivity() {
     private var toastJob: Job? = null
     private var photoJob: Job? = null
 
+    private var airplayRenderer: AirPlayVideoRenderer? = null
+    private var mirroring = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater)
@@ -41,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         MediaRepo.refresh()
 
         setupPlayer()
+        setupAirPlay()
         showIdle()
 
         lifecycleScope.launch {
@@ -80,6 +87,49 @@ class MainActivity : AppCompatActivity() {
             }
         })
         player = p
+    }
+
+    // ------------------------------------------------------------ AirPlay
+
+    private fun setupAirPlay() {
+        b.airplaySurface.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                airplayRenderer = AirPlayVideoRenderer(holder.surface)
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                airplayRenderer?.stop()
+                airplayRenderer = null
+            }
+        })
+
+        AirPlayBridge.listener = object : AirPlayBridge.Listener {
+            // Called on UxPlay's native callback thread -- decode work stays
+            // off the UI thread on purpose, AirPlayVideoRenderer is thread-safe.
+            override fun onVideoFrame(data: ByteArray, isH265: Boolean, ntpTimeRemote: Long) {
+                airplayRenderer?.feed(data, isH265)
+            }
+
+            override fun onMirrorStateChanged(running: Boolean) {
+                runOnUiThread {
+                    mirroring = running
+                    if (running) showAirPlay() else showIdle()
+                }
+            }
+        }
+    }
+
+    private fun showAirPlay() {
+        photoJob?.cancel()
+        slideshowJob?.cancel()
+        player?.pause()
+        b.idleView.visibility = View.GONE
+        b.playerView.visibility = View.GONE
+        b.photoView.visibility = View.GONE
+        b.titleOverlay.visibility = View.GONE
+        b.airplaySurface.visibility = View.VISIBLE
     }
 
     private fun onPlaybackEnded() {
@@ -177,6 +227,7 @@ class MainActivity : AppCompatActivity() {
         CastState.currentId.value = id
         CastState.lastError.value = ""
         b.idleView.visibility = View.GONE
+        b.airplaySurface.visibility = View.GONE
         showTitle(entry.name)
 
         if (entry.isVideo) {
@@ -227,6 +278,7 @@ class MainActivity : AppCompatActivity() {
         b.playerView.visibility = View.GONE
         b.photoView.visibility = View.GONE
         b.photoView.setImageDrawable(null)
+        b.airplaySurface.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
         b.idleView.visibility = View.VISIBLE
         renderIdleInfo()
@@ -385,6 +437,9 @@ class MainActivity : AppCompatActivity() {
         player?.release()
         player = null
         b.playerView.player = null
+        AirPlayBridge.listener = null
+        airplayRenderer?.stop()
+        airplayRenderer = null
         if (isFinishing) ServerService.stop(this)
         super.onDestroy()
     }
