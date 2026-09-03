@@ -16,7 +16,10 @@ import android.view.Surface
  * single thread, with [stop] additionally allowed from the UI thread, so
  * codec lifecycle access is synchronized against that one race.
  */
-class AirPlayVideoRenderer(private val surface: Surface) {
+class AirPlayVideoRenderer(
+    private val surface: Surface,
+    private val onVideoSize: ((width: Int, height: Int) -> Unit)? = null
+) {
 
     private var codec: MediaCodec? = null
     private var configured = false
@@ -54,6 +57,14 @@ class AirPlayVideoRenderer(private val surface: Surface) {
         val info = MediaCodec.BufferInfo()
         while (true) {
             val outIndex = mc.dequeueOutputBuffer(info, 0)
+            if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                val fmt = mc.outputFormat
+                val w = fmt.getInteger(MediaFormat.KEY_WIDTH)
+                val h = fmt.getInteger(MediaFormat.KEY_HEIGHT)
+                Log.i(TAG, "output format changed: ${w}x$h")
+                onVideoSize?.invoke(w, h)
+                continue
+            }
             if (outIndex < 0) break
             mc.releaseOutputBuffer(outIndex, true)
         }

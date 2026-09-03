@@ -4,9 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Bundle
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.SurfaceHolder
 import android.view.View
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
@@ -94,7 +96,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupAirPlay() {
         b.airplaySurface.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
-                airplayRenderer = AirPlayVideoRenderer(holder.surface)
+                airplayRenderer = AirPlayVideoRenderer(holder.surface) { w, h ->
+                    runOnUiThread { resizeAirPlaySurface(w, h) }
+                }
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
@@ -129,7 +133,37 @@ class MainActivity : AppCompatActivity() {
         b.playerView.visibility = View.GONE
         b.photoView.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
+        // Full screen until the first onVideoSize call letterboxes it to the
+        // real aspect ratio -- avoids briefly showing a stale box sized from
+        // a previous mirroring session.
+        val lp = b.airplaySurface.layoutParams as FrameLayout.LayoutParams
+        lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+        lp.height = FrameLayout.LayoutParams.MATCH_PARENT
+        b.airplaySurface.layoutParams = lp
         b.airplaySurface.visibility = View.VISIBLE
+    }
+
+    /** Letterboxes the mirrored picture instead of stretching it to fill the (landscape) TV screen. */
+    private fun resizeAirPlaySurface(videoWidth: Int, videoHeight: Int) {
+        if (videoWidth <= 0 || videoHeight <= 0) return
+        val containerW = b.root.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val containerH = b.root.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val videoAspect = videoWidth.toFloat() / videoHeight
+        val containerAspect = containerW.toFloat() / containerH
+        val targetW: Int
+        val targetH: Int
+        if (videoAspect > containerAspect) {
+            targetW = containerW
+            targetH = (containerW / videoAspect).toInt()
+        } else {
+            targetW = (containerH * videoAspect).toInt()
+            targetH = containerH
+        }
+        val lp = b.airplaySurface.layoutParams as FrameLayout.LayoutParams
+        lp.width = targetW
+        lp.height = targetH
+        lp.gravity = Gravity.CENTER
+        b.airplaySurface.layoutParams = lp
     }
 
     private fun onPlaybackEnded() {
