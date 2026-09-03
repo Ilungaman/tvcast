@@ -11,7 +11,7 @@ android {
         applicationId = "com.tvcast.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
 
         ndk {
@@ -38,6 +38,21 @@ android {
     }
     ndkVersion = "26.3.11579264"
 
+    signingConfigs {
+        getByName("debug") {
+            // A checked-in debug key, not the machine-local one Gradle
+            // auto-generates by default: every CI run is a fresh runner
+            // with no ~/.android/debug.keystore, so without this each
+            // build got a new random signature and installing a newer
+            // APK over an older one failed with a bare "app not
+            // installed" (signature mismatch on update).
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -45,6 +60,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
