@@ -1,3 +1,9 @@
 [submodule "app/src/main/cpp/third_party/uxplay"]
 	path = app/src/main/cpp/third_party/uxplay
 	url = https://github.com/FDH2/UxPlay.git
+[submodule "app/src/main/cpp/third_party/android_openssl"]
+	path = app/src/main/cpp/third_party/android_openssl
+	url = https://github.com/KDAB/android_openssl.git
+[submodule "app/src/main/cpp/third_party/libplist"]
+	path = app/src/main/cpp/third_party/libplist
+	url = https://github.com/libimobiledevice/libplist.git

@@ -13,7 +13,27 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        ndk {
+            // Virtually all Android TV hardware is arm64; keep the native
+            // AirPlay receiver's build matrix (and the prebuilt OpenSSL it
+            // links) to just this one ABI.
+            abiFilters += "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++14"
+            }
+        }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    ndkVersion = "26.3.11579264"
 
     buildTypes {
         release {

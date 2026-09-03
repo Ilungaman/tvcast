@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.tvcast.receiver.airplay.AirPlayReceiver
 
 /**
  * Фоновый сервис: держит Ktor-сервер и регистрацию mDNS, пока приложение открыто.
@@ -19,6 +20,7 @@ class ServerService : Service() {
 
     private var server: WebServer? = null
     private var nsd: NsdHelper? = null
+    private var airplay: AirPlayReceiver? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,13 +38,19 @@ class ServerService : Service() {
         nsd = NsdHelper(applicationContext).also {
             it.register(WebServer.PORT, "TVCast ${Build.MODEL ?: "Android TV"}")
         }
+
+        airplay = AirPlayReceiver(applicationContext).also {
+            it.start(getString(R.string.app_name))
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        airplay?.stop()
         nsd?.unregister()
         server?.stop()
+        airplay = null
         nsd = null
         server = null
         super.onDestroy()
