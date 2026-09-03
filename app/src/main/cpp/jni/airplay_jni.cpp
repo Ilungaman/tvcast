@@ -54,8 +54,15 @@ jclass g_bridgeClass = nullptr;
 jmethodID g_onVideoFrame = nullptr;
 jmethodID g_onMirrorStateChanged = nullptr;
 
-void ensureBridgeCached(JNIEnv *env) {
-    if (g_bridgeClass) return;
+/* Must be called from JNI_OnLoad (i.e. on the thread that called
+ * System.loadLibrary), NOT lazily from a UxPlay worker thread attached via
+ * AttachCurrentThread. FindClass resolves against the CALLER's classloader,
+ * and a natively-attached thread has no app classloader in its context --
+ * it only sees bootstrap/system classes, so FindClass("com/tvcast/...")
+ * silently returns null there and every later callback into Kotlin is a
+ * no-op. (This bit us: pairing worked, but the screen never switched
+ * because onMirrorStateChanged was never actually reaching Kotlin.) */
+void cacheBridge(JNIEnv *env) {
     jclass local = env->FindClass("com/tvcast/receiver/airplay/AirPlayBridge");
     if (!local) {
         LOGE("AirPlayBridge class not found");
@@ -69,6 +76,8 @@ void ensureBridgeCached(JNIEnv *env) {
     if (!g_onVideoFrame || !g_onMirrorStateChanged) {
         LOGE("AirPlayBridge methods not found");
         env->ExceptionClear();
+    } else {
+        LOGI("AirPlayBridge cached OK");
     }
 }
 
@@ -108,7 +117,6 @@ void cb_video_process(void *cls, raop_ntp_t *ntp, video_decode_struct *data) {
     (void) cls; (void) ntp;
     JNIEnv *env = attachCurrentThread();
     if (!env) return;
-    ensureBridgeCached(env);
     if (!g_onVideoFrame) return;
 
     jbyteArray arr = env->NewByteArray(data->data_len);
@@ -155,7 +163,6 @@ void cb_mirror_video_running(void *cls, bool is_running) {
     LOGI("mirror_video_running=%d", is_running);
     JNIEnv *env = attachCurrentThread();
     if (!env) return;
-    ensureBridgeCached(env);
     if (!g_onMirrorStateChanged) return;
     env->CallStaticVoidMethod(g_bridgeClass, g_onMirrorStateChanged, (jboolean) is_running);
     if (env->ExceptionCheck()) env->ExceptionClear();
@@ -188,6 +195,12 @@ float cb_on_video_playlist_remove(void *cls) { (void) cls; return 0.0f; }
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /* reserved */) {
     g_vm = vm;
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK && env != nullptr) {
+        cacheBridge(env);
+    } else {
+        LOGE("JNI_OnLoad: could not get JNIEnv");
+    }
     return JNI_VERSION_1_6;
 }
 
