@@ -15,10 +15,13 @@ android {
         versionName = "1.0"
 
         ndk {
-            // Virtually all Android TV hardware is arm64; keep the native
-            // AirPlay receiver's build matrix (and the prebuilt OpenSSL it
-            // links) to just this one ABI.
+            // Many Android TV boxes (especially older/budget Philips
+            // models) still run a 32-bit userspace even on ARM SoCs that
+            // are 64-bit capable, so an arm64-only build silently fails to
+            // install on them ("app not installed", no matching ABI).
+            // Cover both; the prebuilt OpenSSL ships static libs for each.
             abiFilters += "arm64-v8a"
+            abiFilters += "armeabi-v7a"
         }
         externalNativeBuild {
             cmake {
