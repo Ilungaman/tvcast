@@ -101,37 +101,51 @@ class AirPlayVideoRenderer(
     }
 
     /**
-     * Cheap pre-check before paying for a full splitAnnexB() scan: reads
-     * only the NAL type byte right after the FIRST start code (SPS, when
-     * present at all, is conventionally the lead NAL of a keyframe
-     * packet). Runs on every single video frame once configured, so this
-     * has to stay O(few bytes), not O(frame size) -- a full per-frame scan
-     * here was enough to fall behind on weaker (armeabi-v7a) hardware and
-     * starve the decoder, which showed up as a black/frozen screen.
+     * Cheap pre-check before paying for a full splitAnnexB() scan of the
+     * whole (possibly large) frame. Runs on every single video frame once
+     * configured, so this has to stay bounded, not O(frame size) -- an
+     * earlier version that scanned the whole buffer was enough to fall
+     * behind on weaker (armeabi-v7a) hardware and starve the decoder,
+     * which showed up as a black/frozen screen.
+     *
+     * An earlier, even cheaper version only looked at the very FIRST NAL,
+     * on the assumption that SPS (when present) always leads a keyframe
+     * packet. Real encoders often prepend an AUD or SEI NAL before SPS
+     * though, and that version silently missed the resolution change
+     * whenever that happened: the decoder kept running against stale
+     * config, MediaCodec started rejecting frames, and -- since nothing
+     * else arrives for genuinely static content, e.g. a single opened
+     * photo -- the picture stayed black until some unrelated later event
+     * (a screenshot) forced a fresh keyframe through tryConfigure()'s own
+     * full-buffer scan. Header NALs (AUD/SEI/SPS/PPS) all live at the very
+     * start of a keyframe packet before the much larger slice data, so
+     * scanning a small fixed PREFIX instead of just the first NAL is still
+     * cheap but no longer position-sensitive.
      */
-    private fun firstNalType(data: ByteArray, isH265: Boolean): Int? {
+    private fun hasNalTypeInPrefix(data: ByteArray, isH265: Boolean, wantType: Int): Boolean {
+        val limit = minOf(data.size, PREFIX_SCAN_BYTES)
         var i = 0
-        while (i + 3 < data.size) {
+        while (i + 3 < limit) {
             if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) {
-                if (data[i + 2] == 1.toByte()) {
-                    val p = i + 3
-                    if (p >= data.size) return null
-                    return if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
-                }
-                if (i + 4 < data.size && data[i + 2] == 0.toByte() && data[i + 3] == 1.toByte()) {
-                    val p = i + 4
-                    if (p >= data.size) return null
-                    return if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
+                val is4 = i + 3 < data.size && data[i + 2] == 0.toByte() && data[i + 3] == 1.toByte()
+                val is3 = !is4 && data[i + 2] == 1.toByte()
+                if (is4 || is3) {
+                    val p = i + if (is4) 4 else 3
+                    if (p >= data.size) return false
+                    val type = if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
+                    if (type == wantType) return true
+                    i = p
+                    continue
                 }
             }
             i++
         }
-        return null
+        return false
     }
 
     private fun resolutionChanged(data: ByteArray, isH265: Boolean): Boolean {
         val wantType = if (isH265) 33 else 7
-        if (firstNalType(data, isH265) != wantType) return false
+        if (!hasNalTypeInPrefix(data, isH265, wantType)) return false
         val sps = extractNal(data, isH265, wantType) ?: return false
         val prev = activeSps ?: return false
         return !sps.contentEquals(prev)
@@ -264,5 +278,10 @@ class AirPlayVideoRenderer(
 
     companion object {
         private const val TAG = "AirPlayVideoRenderer"
+
+        // Comfortably covers AUD + SEI + SPS + PPS (each tens of bytes) at
+        // the start of a keyframe packet, well short of the slice data
+        // that makes up the bulk of a large frame.
+        private const val PREFIX_SCAN_BYTES = 512
     }
 }
