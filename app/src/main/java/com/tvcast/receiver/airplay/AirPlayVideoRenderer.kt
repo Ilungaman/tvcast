@@ -5,36 +5,29 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
+import java.util.concurrent.ArrayBlockingQueue
 
 /**
  * Decodes the Annex-B H.264/H.265 elementary stream UxPlay hands us (see
  * AirPlayBridge.onVideoFrame) with a hardware MediaCodec straight onto a
  * Surface.
  *
- * Frames arrive serially on one native callback thread (UxPlay's mirror RTP
- * receiver thread) -- every method here is written to be driven from that
- * single thread, with [stop] additionally allowed from the UI thread, so
- * codec lifecycle access is synchronized against that one race.
- *
- * Resolution changes mid-stream (phone rotation, or apparently a
- * differently-sized internal canvas when Photos opens a single picture
- * full-screen vs. its grid) are NOT detected by peeking at incoming NAL
- * bytes -- two attempts at that (comparing SPS bytes seen in the stream)
- * each caused their own real-device regressions: a full per-frame buffer
- * scan was expensive enough on this TV's weaker (armeabi-v7a) hardware to
- * starve the decoder outright, and a cheaper positional heuristic still
- * both missed real changes (stuck black screen) and, worse, apparently
- * misfired on unchanged content -- repeatedly tearing down and recreating
- * the MediaCodec/Surface hookup eventually left the screen permanently
- * black, consistent with exhausting or corrupting a hardware decoder
- * resource that a well-behaved app only allocates once.
- *
- * Surface-output decoders on modern Android generally support adaptive
- * playback (resolution changes handled internally, surfaced as another
- * INFO_OUTPUT_FORMAT_CHANGED -- already handled in drainOutput()) without
- * needing a teardown at all. Where a decoder genuinely can't cope, feeding
- * it mismatched data throws; the only reconfigure path left is reactive,
- * triggered by that real failure rather than a guess about the bitstream.
+ * [feed] is called directly from UxPlay's native mirror-receiver thread
+ * (airplay_jni.cpp's cb_video_process) -- the SAME thread that reads the
+ * mirror TCP stream off the socket (raop_rtp_mirror.c's
+ * raop_rtp_mirror_thread does recv() and depacketizing there too, there is
+ * no separate network I/O thread). Doing MediaCodec work on that thread
+ * would block it on Java/JNI calls, stalling the TCP read loop -- and
+ * therefore network delivery -- for as long as decode of the current frame
+ * takes. Confirmed against the real TV: the same footage that judders over
+ * AirPlay during fast motion played back perfectly smoothly from a local
+ * flash drive (a path with no network thread in the loop at all), pointing
+ * at this self-inflicted stall rather than the decoder being too slow for
+ * the content. So [feed] only ever hands the frame to a queue and returns;
+ * all actual MediaCodec work happens on a dedicated decode thread that
+ * owns [codec]/[configured]/[pendingParamSets] exclusively -- [stop] is
+ * the only other public entry point and only ever signals that thread,
+ * never touches codec state directly.
  */
 class AirPlayVideoRenderer(
     private val surface: Surface,
@@ -51,8 +44,57 @@ class AirPlayVideoRenderer(
     private var firstFramePtsNs = -1L
     private var firstRenderAtNs = -1L
 
-    @Synchronized
+    private data class Frame(val data: ByteArray, val isH265: Boolean)
+
+    // Bounded so a real decode backlog can't grow memory or latency
+    // without limit -- dropping the oldest queued frame is cheap and, once
+    // the render clock is behind by more than MAX_LAG_NS anyway, that
+    // frame was headed for a resync discard on the output side regardless.
+    private val queue = ArrayBlockingQueue<Frame>(QUEUE_CAPACITY)
+
+    @Volatile
+    private var running = true
+
+    // Fields above must all be initialized before this line: Thread.start()
+    // happens-before everything the new thread observes, but only for
+    // state written before start() is called, so decodeThread must be the
+    // last property in the class.
+    private val decodeThread = Thread(::decodeLoop, "AirPlayVideoDecode").apply { start() }
+
     fun feed(data: ByteArray, isH265: Boolean) {
+        val frame = Frame(data, isH265)
+        if (!queue.offer(frame)) {
+            queue.poll()
+            queue.offer(frame)
+        }
+    }
+
+    fun stop() {
+        running = false
+        decodeThread.interrupt()
+        try {
+            decodeThread.join(500)
+        } catch (_: InterruptedException) {
+        }
+    }
+
+    private fun decodeLoop() {
+        try {
+            while (running) {
+                val frame = try {
+                    queue.take()
+                } catch (_: InterruptedException) {
+                    break
+                }
+                decodeFrame(frame.data, frame.isH265)
+            }
+        } finally {
+            releaseCodec()
+            pendingParamSets.clear()
+        }
+    }
+
+    private fun decodeFrame(data: ByteArray, isH265: Boolean) {
         try {
             if (!configured) {
                 tryConfigure(data, isH265)
@@ -60,7 +102,7 @@ class AirPlayVideoRenderer(
             }
             feedToCodec(data)
         } catch (t: Throwable) {
-            Log.e(TAG, "feed() failed, reconfiguring from this frame", t)
+            Log.e(TAG, "decodeFrame() failed, reconfiguring from this frame", t)
             releaseCodec()
             pendingParamSets.clear()
             try {
@@ -71,12 +113,6 @@ class AirPlayVideoRenderer(
                 releaseCodec()
             }
         }
-    }
-
-    @Synchronized
-    fun stop() {
-        releaseCodec()
-        pendingParamSets.clear()
     }
 
     private fun feedToCodec(data: ByteArray) {
@@ -110,10 +146,8 @@ class AirPlayVideoRenderer(
      * Displaying a frame the instant our thread happens to reach
      * releaseOutputBuffer() (as releaseOutputBuffer(index, true) does)
      * couples on-screen timing to whatever jitter exists in our own
-     * pipeline -- network arrival spacing, GC pauses, or just slower decode
-     * of a more complex frame (panning shots carry more motion data than
-     * static ones, and were exactly where this showed up on this device's
-     * weaker armeabi-v7a decode path).
+     * pipeline -- decode time variance, GC pauses, and previously (before
+     * decode moved to its own thread) network arrival spacing too.
      *
      * feedToCodec() stamps each input buffer's presentationTimeUs with its
      * arrival time (System.nanoTime()/1000); MediaCodec carries that
@@ -125,17 +159,15 @@ class AirPlayVideoRenderer(
      * SurfaceFlinger's timed presentation absorb small timing variance
      * instead of showing it as judder.
      *
-     * That alone isn't enough during a sustained burst of complex frames
-     * (confirmed against the real TV: smooth on calm motion, tearing during
-     * a camera pan, smooth again once it slows). Panning frames carry more
-     * motion data and take longer to decode on this device -- if decode
-     * genuinely can't keep up for a stretch, frames' scheduled times drift
-     * further into the past every frame, and a past timestamp renders
-     * immediately, so the backlog dumps onto the screen in one catch-up
-     * burst the moment decode gets a chance to run. Once the drift passes
-     * MAX_LAG_NS, resync the anchor to now instead of dutifully replaying
-     * the growing backlog at its original spacing -- trading exact frame
-     * timing (briefly discarding the lag) for staying visually smooth.
+     * That alone isn't enough during a sustained burst of complex frames:
+     * if decode genuinely can't keep up for a stretch, frames' scheduled
+     * times drift further into the past every frame, and a past timestamp
+     * renders immediately, so the backlog dumps onto the screen in one
+     * catch-up burst the moment decode gets a chance to run. Once the
+     * drift passes MAX_LAG_NS, resync the anchor to now instead of
+     * dutifully replaying the growing backlog at its original spacing --
+     * trading exact frame timing (briefly discarding the lag) for staying
+     * visually smooth.
      */
     private fun scheduleRenderTime(presentationTimeUs: Long): Long {
         val ptsNs = presentationTimeUs * 1000L
@@ -286,11 +318,18 @@ class AirPlayVideoRenderer(
     companion object {
         private const val TAG = "AirPlayVideoRenderer"
 
+        // How many compressed frames can queue up between the native
+        // callback thread and the decode thread before feed() starts
+        // dropping the oldest one. Roughly matches RENDER_BUFFER_NS at a
+        // typical mirroring frame rate -- enough to absorb a short burst
+        // without letting a real backlog grow unbounded.
+        private const val QUEUE_CAPACITY = 4
+
         // How far into the future the first frame of a decode session is
-        // scheduled, giving later frames room to absorb arrival/decode
-        // jitter without visibly slipping. Adds the same amount of
-        // end-to-end latency; kept small since this is mirroring, not a
-        // playback buffer.
+        // scheduled, giving later frames room to absorb decode jitter
+        // without visibly slipping. Adds the same amount of end-to-end
+        // latency; kept small since this is mirroring, not a playback
+        // buffer.
         private const val RENDER_BUFFER_NS = 100_000_000L // 100ms
 
         // How far a scheduled frame is allowed to drift into the past
