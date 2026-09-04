@@ -45,6 +45,12 @@ class AirPlayVideoRenderer(
     private var configured = false
     private val pendingParamSets = ArrayList<ByteArray>()
 
+    // Anchors a playback clock to the first frame of the current decode
+    // session (see scheduleRenderTime()), reset whenever the codec is torn
+    // down and recreated.
+    private var firstFramePtsNs = -1L
+    private var firstRenderAtNs = -1L
+
     @Synchronized
     fun feed(data: ByteArray, isH265: Boolean) {
         try {
@@ -96,8 +102,36 @@ class AirPlayVideoRenderer(
                 continue
             }
             if (outIndex < 0) break
-            mc.releaseOutputBuffer(outIndex, true)
+            mc.releaseOutputBuffer(outIndex, scheduleRenderTime(info.presentationTimeUs))
         }
+    }
+
+    /**
+     * Displaying a frame the instant our thread happens to reach
+     * releaseOutputBuffer() (as releaseOutputBuffer(index, true) does)
+     * couples on-screen timing to whatever jitter exists in our own
+     * pipeline -- network arrival spacing, GC pauses, or just slower decode
+     * of a more complex frame (panning shots carry more motion data than
+     * static ones, and were exactly where this showed up on this device's
+     * weaker armeabi-v7a decode path).
+     *
+     * feedToCodec() stamps each input buffer's presentationTimeUs with its
+     * arrival time (System.nanoTime()/1000); MediaCodec carries that
+     * timestamp through to the matching output buffer unchanged. Anchoring
+     * the first frame's arrival time to "now plus a small buffer" and then
+     * scheduling every later frame at the same offset from that anchor
+     * reproduces the original relative spacing between frames instead of
+     * however our own processing happened to be spaced -- letting
+     * SurfaceFlinger's timed presentation absorb small timing variance
+     * instead of showing it as judder.
+     */
+    private fun scheduleRenderTime(presentationTimeUs: Long): Long {
+        val ptsNs = presentationTimeUs * 1000L
+        if (firstFramePtsNs < 0) {
+            firstFramePtsNs = ptsNs
+            firstRenderAtNs = System.nanoTime() + RENDER_BUFFER_NS
+        }
+        return firstRenderAtNs + (ptsNs - firstFramePtsNs)
     }
 
     /**
@@ -174,6 +208,8 @@ class AirPlayVideoRenderer(
         }
         codec = null
         configured = false
+        firstFramePtsNs = -1L
+        firstRenderAtNs = -1L
     }
 
     private fun isNalType(nalWithStartCode: ByteArray, isH265: Boolean, wantType: Int): Boolean {
@@ -234,5 +270,12 @@ class AirPlayVideoRenderer(
 
     companion object {
         private const val TAG = "AirPlayVideoRenderer"
+
+        // How far into the future the first frame of a decode session is
+        // scheduled, giving later frames room to absorb arrival/decode
+        // jitter without visibly slipping. Adds the same amount of
+        // end-to-end latency; kept small since this is mirroring, not a
+        // playback buffer.
+        private const val RENDER_BUFFER_NS = 100_000_000L // 100ms
     }
 }
