@@ -9,12 +9,32 @@ import android.view.Surface
 /**
  * Decodes the Annex-B H.264/H.265 elementary stream UxPlay hands us (see
  * AirPlayBridge.onVideoFrame) with a hardware MediaCodec straight onto a
- * Surface. No audio yet.
+ * Surface.
  *
  * Frames arrive serially on one native callback thread (UxPlay's mirror RTP
  * receiver thread) -- every method here is written to be driven from that
  * single thread, with [stop] additionally allowed from the UI thread, so
  * codec lifecycle access is synchronized against that one race.
+ *
+ * Resolution changes mid-stream (phone rotation, or apparently a
+ * differently-sized internal canvas when Photos opens a single picture
+ * full-screen vs. its grid) are NOT detected by peeking at incoming NAL
+ * bytes -- two attempts at that (comparing SPS bytes seen in the stream)
+ * each caused their own real-device regressions: a full per-frame buffer
+ * scan was expensive enough on this TV's weaker (armeabi-v7a) hardware to
+ * starve the decoder outright, and a cheaper positional heuristic still
+ * both missed real changes (stuck black screen) and, worse, apparently
+ * misfired on unchanged content -- repeatedly tearing down and recreating
+ * the MediaCodec/Surface hookup eventually left the screen permanently
+ * black, consistent with exhausting or corrupting a hardware decoder
+ * resource that a well-behaved app only allocates once.
+ *
+ * Surface-output decoders on modern Android generally support adaptive
+ * playback (resolution changes handled internally, surfaced as another
+ * INFO_OUTPUT_FORMAT_CHANGED -- already handled in drainOutput()) without
+ * needing a teardown at all. Where a decoder genuinely can't cope, feeding
+ * it mismatched data throws; the only reconfigure path left is reactive,
+ * triggered by that real failure rather than a guess about the bitstream.
  */
 class AirPlayVideoRenderer(
     private val surface: Surface,
@@ -24,37 +44,26 @@ class AirPlayVideoRenderer(
     private var codec: MediaCodec? = null
     private var configured = false
     private val pendingParamSets = ArrayList<ByteArray>()
-    private var activeSps: ByteArray? = null
 
     @Synchronized
     fun feed(data: ByteArray, isH265: Boolean) {
         try {
-            if (configured && resolutionChanged(data, isH265)) {
-                // The phone rotated (or otherwise renegotiated resolution):
-                // a new SPS shows up mid-stream. MediaCodec doesn't adapt to
-                // that on its own -- tear down and let the same
-                // param-set-accumulation path below reconfigure from
-                // scratch, same as the very first frame.
-                Log.i(TAG, "SPS changed, reconfiguring decoder")
-                releaseCodec()
-                pendingParamSets.clear()
-            }
             if (!configured) {
                 tryConfigure(data, isH265)
                 if (!configured) return
             }
-            val mc = codec ?: return
-            val inIndex = mc.dequeueInputBuffer(10_000)
-            if (inIndex >= 0) {
-                val buf = mc.getInputBuffer(inIndex) ?: return
-                buf.clear()
-                buf.put(data)
-                mc.queueInputBuffer(inIndex, 0, data.size, System.nanoTime() / 1000, 0)
-            }
-            drainOutput(mc)
+            feedToCodec(data)
         } catch (t: Throwable) {
-            Log.e(TAG, "feed() failed, resetting decoder", t)
+            Log.e(TAG, "feed() failed, reconfiguring from this frame", t)
             releaseCodec()
+            pendingParamSets.clear()
+            try {
+                tryConfigure(data, isH265)
+                if (configured) feedToCodec(data)
+            } catch (t2: Throwable) {
+                Log.e(TAG, "reconfigure retry also failed", t2)
+                releaseCodec()
+            }
         }
     }
 
@@ -62,6 +71,18 @@ class AirPlayVideoRenderer(
     fun stop() {
         releaseCodec()
         pendingParamSets.clear()
+    }
+
+    private fun feedToCodec(data: ByteArray) {
+        val mc = codec ?: return
+        val inIndex = mc.dequeueInputBuffer(10_000)
+        if (inIndex >= 0) {
+            val buf = mc.getInputBuffer(inIndex) ?: return
+            buf.clear()
+            buf.put(data)
+            mc.queueInputBuffer(inIndex, 0, data.size, System.nanoTime() / 1000, 0)
+        }
+        drainOutput(mc)
     }
 
     private fun drainOutput(mc: MediaCodec) {
@@ -100,66 +121,6 @@ class AirPlayVideoRenderer(
         return fmt.getInteger(MediaFormat.KEY_WIDTH) to fmt.getInteger(MediaFormat.KEY_HEIGHT)
     }
 
-    /**
-     * Cheap pre-check before paying for a full splitAnnexB() scan of the
-     * whole (possibly large) frame. Runs on every single video frame once
-     * configured, so this has to stay bounded, not O(frame size) -- an
-     * earlier version that scanned the whole buffer was enough to fall
-     * behind on weaker (armeabi-v7a) hardware and starve the decoder,
-     * which showed up as a black/frozen screen.
-     *
-     * An earlier, even cheaper version only looked at the very FIRST NAL,
-     * on the assumption that SPS (when present) always leads a keyframe
-     * packet. Real encoders often prepend an AUD or SEI NAL before SPS
-     * though, and that version silently missed the resolution change
-     * whenever that happened: the decoder kept running against stale
-     * config, MediaCodec started rejecting frames, and -- since nothing
-     * else arrives for genuinely static content, e.g. a single opened
-     * photo -- the picture stayed black until some unrelated later event
-     * (a screenshot) forced a fresh keyframe through tryConfigure()'s own
-     * full-buffer scan. Header NALs (AUD/SEI/SPS/PPS) all live at the very
-     * start of a keyframe packet before the much larger slice data, so
-     * scanning a small fixed PREFIX instead of just the first NAL is still
-     * cheap but no longer position-sensitive.
-     */
-    private fun hasNalTypeInPrefix(data: ByteArray, isH265: Boolean, wantType: Int): Boolean {
-        val limit = minOf(data.size, PREFIX_SCAN_BYTES)
-        var i = 0
-        while (i + 3 < limit) {
-            if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) {
-                val is4 = i + 3 < data.size && data[i + 2] == 0.toByte() && data[i + 3] == 1.toByte()
-                val is3 = !is4 && data[i + 2] == 1.toByte()
-                if (is4 || is3) {
-                    val p = i + if (is4) 4 else 3
-                    if (p >= data.size) return false
-                    val type = if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
-                    if (type == wantType) return true
-                    i = p
-                    continue
-                }
-            }
-            i++
-        }
-        return false
-    }
-
-    private fun resolutionChanged(data: ByteArray, isH265: Boolean): Boolean {
-        val wantType = if (isH265) 33 else 7
-        if (!hasNalTypeInPrefix(data, isH265, wantType)) return false
-        val sps = extractNal(data, isH265, wantType) ?: return false
-        val prev = activeSps ?: return false
-        return !sps.contentEquals(prev)
-    }
-
-    private fun extractNal(data: ByteArray, isH265: Boolean, wantType: Int): ByteArray? {
-        for (nal in splitAnnexB(data)) {
-            if (nal.isEmpty()) continue
-            val type = if (isH265) (nal[0].toInt() shr 1) and 0x3F else nal[0].toInt() and 0x1F
-            if (type == wantType) return nal
-        }
-        return null
-    }
-
     private fun tryConfigure(data: ByteArray, isH265: Boolean) {
         val nals = splitAnnexB(data)
         for (nal in nals) {
@@ -185,16 +146,11 @@ class AirPlayVideoRenderer(
         if (isH265) {
             val all = concat(pendingParamSets)
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(all))
-            val sps265 = pendingParamSets.first { isNalType(it, true, 33) }
-            activeSps = sps265.copyOfRange(4, sps265.size)
         } else {
             val sps = pendingParamSets.first { isNalType(it, false, 7) }
             val pps = pendingParamSets.first { isNalType(it, false, 8) }
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(sps))
             format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(pps))
-            // Stored without the 4-byte start code withStartCode() added,
-            // to compare like-for-like against extractNal()'s raw payload.
-            activeSps = sps.copyOfRange(4, sps.size)
         }
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
 
@@ -278,10 +234,5 @@ class AirPlayVideoRenderer(
 
     companion object {
         private const val TAG = "AirPlayVideoRenderer"
-
-        // Comfortably covers AUD + SEI + SPS + PPS (each tens of bytes) at
-        // the start of a keyframe packet, well short of the slice data
-        // that makes up the bulk of a large frame.
-        private const val PREFIX_SCAN_BYTES = 512
     }
 }
