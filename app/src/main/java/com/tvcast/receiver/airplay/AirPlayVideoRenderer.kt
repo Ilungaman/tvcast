@@ -127,15 +127,46 @@ class AirPlayVideoRenderer(
         }
     }
 
+    /**
+     * Confirmed against the real TV: enlarging the software queue between
+     * the native callback and this decode thread (see [queue]) didn't fix
+     * the ghosting/residual-image corruption -- because that queue was
+     * never the actual drop point. This method was: dequeue an input
+     * buffer with a 10ms timeout, and if the codec's own internal input
+     * buffer pool was momentarily full, silently move on without ever
+     * calling queueInputBuffer for that access unit. Same failure mode as
+     * the queue bug (a missing frame breaks every P-frame decoded
+     * afterward until the next keyframe), just one layer deeper, and one
+     * this decode thread is now more likely to hit than before: with
+     * decode no longer paced by real-time network arrival (that pacing is
+     * exactly what moving decode off the network thread removed) and a
+     * large queue now allowed to hold a backlog, this thread can race
+     * through a backlog as fast as the CPU allows, which is exactly when a
+     * codec's internal buffer pool is most likely to run dry.
+     *
+     * Retries for a while instead, draining any available output between
+     * attempts -- freeing decoded output is often what lets the codec make
+     * an input buffer available again. Blocking this thread longer here is
+     * safe now that it isn't also the thread reading the network socket.
+     */
     private fun feedToCodec(data: ByteArray) {
         val mc = codec ?: return
-        val inIndex = mc.dequeueInputBuffer(10_000)
-        if (inIndex >= 0) {
-            val buf = mc.getInputBuffer(inIndex) ?: return
-            buf.clear()
-            buf.put(data)
-            mc.queueInputBuffer(inIndex, 0, data.size, System.nanoTime() / 1000, 0)
+        var inIndex = -1
+        val deadlineNs = System.nanoTime() + INPUT_BUFFER_WAIT_NS
+        while (true) {
+            inIndex = mc.dequeueInputBuffer(10_000)
+            if (inIndex >= 0 || System.nanoTime() >= deadlineNs) break
+            drainOutput(mc)
         }
+        if (inIndex < 0) {
+            Log.w(TAG, "no input buffer available after ${INPUT_BUFFER_WAIT_NS / 1_000_000}ms, dropping frame")
+            drainOutput(mc)
+            return
+        }
+        val buf = mc.getInputBuffer(inIndex) ?: return
+        buf.clear()
+        buf.put(data)
+        mc.queueInputBuffer(inIndex, 0, data.size, System.nanoTime() / 1000, 0)
         drainOutput(mc)
     }
 
@@ -339,6 +370,16 @@ class AirPlayVideoRenderer(
         // the resulting worst-case memory use is trivial for compressed
         // H.264/H.265 access units.
         private const val QUEUE_CAPACITY = 150
+
+        // Total time feedToCodec() will retry for an input buffer (via
+        // repeated bounded dequeueInputBuffer calls, draining output
+        // between attempts) before giving up and dropping the frame. Safe
+        // to be generous -- this thread no longer shares a thread with
+        // network I/O, so blocking it longer here doesn't stall anything
+        // else, and giving the codec more chances to free a buffer is
+        // exactly what avoids the mid-stream corruption a silent drop
+        // caused.
+        private const val INPUT_BUFFER_WAIT_NS = 200_000_000L // 200ms
 
         // How far into the future the first frame of a decode session is
         // scheduled, giving later frames room to absorb arrival/decode
