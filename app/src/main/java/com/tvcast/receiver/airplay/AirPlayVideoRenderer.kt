@@ -24,10 +24,21 @@ class AirPlayVideoRenderer(
     private var codec: MediaCodec? = null
     private var configured = false
     private val pendingParamSets = ArrayList<ByteArray>()
+    private var activeSps: ByteArray? = null
 
     @Synchronized
     fun feed(data: ByteArray, isH265: Boolean) {
         try {
+            if (configured && resolutionChanged(data, isH265)) {
+                // The phone rotated (or otherwise renegotiated resolution):
+                // a new SPS shows up mid-stream. MediaCodec doesn't adapt to
+                // that on its own -- tear down and let the same
+                // param-set-accumulation path below reconfigure from
+                // scratch, same as the very first frame.
+                Log.i(TAG, "SPS changed, reconfiguring decoder")
+                releaseCodec()
+                pendingParamSets.clear()
+            }
             if (!configured) {
                 tryConfigure(data, isH265)
                 if (!configured) return
@@ -58,9 +69,7 @@ class AirPlayVideoRenderer(
         while (true) {
             val outIndex = mc.dequeueOutputBuffer(info, 0)
             if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                val fmt = mc.outputFormat
-                val w = fmt.getInteger(MediaFormat.KEY_WIDTH)
-                val h = fmt.getInteger(MediaFormat.KEY_HEIGHT)
+                val (w, h) = decodedSize(mc.outputFormat)
                 Log.i(TAG, "output format changed: ${w}x$h")
                 onVideoSize?.invoke(w, h)
                 continue
@@ -68,6 +77,42 @@ class AirPlayVideoRenderer(
             if (outIndex < 0) break
             mc.releaseOutputBuffer(outIndex, true)
         }
+    }
+
+    /**
+     * H.264/H.265 pad the coded frame up to a macroblock-aligned size (a
+     * multiple of 16), then declare the real visible area via a crop
+     * rectangle -- KEY_WIDTH/KEY_HEIGHT alone report the padded size on
+     * some devices. Real screen content (arbitrary point dimensions, not
+     * 16-aligned) hits this; a still photo's canvas apparently happened to
+     * already be aligned, which is why only mirroring looked wrong.
+     */
+    private fun decodedSize(fmt: MediaFormat): Pair<Int, Int> {
+        val hasCrop = fmt.containsKey("crop-left") && fmt.containsKey("crop-right") &&
+            fmt.containsKey("crop-top") && fmt.containsKey("crop-bottom")
+        if (hasCrop) {
+            val left = fmt.getInteger("crop-left")
+            val right = fmt.getInteger("crop-right")
+            val top = fmt.getInteger("crop-top")
+            val bottom = fmt.getInteger("crop-bottom")
+            return (right - left + 1) to (bottom - top + 1)
+        }
+        return fmt.getInteger(MediaFormat.KEY_WIDTH) to fmt.getInteger(MediaFormat.KEY_HEIGHT)
+    }
+
+    private fun resolutionChanged(data: ByteArray, isH265: Boolean): Boolean {
+        val sps = extractNal(data, isH265, if (isH265) 33 else 7) ?: return false
+        val prev = activeSps ?: return false
+        return !sps.contentEquals(prev)
+    }
+
+    private fun extractNal(data: ByteArray, isH265: Boolean, wantType: Int): ByteArray? {
+        for (nal in splitAnnexB(data)) {
+            if (nal.isEmpty()) continue
+            val type = if (isH265) (nal[0].toInt() shr 1) and 0x3F else nal[0].toInt() and 0x1F
+            if (type == wantType) return nal
+        }
+        return null
     }
 
     private fun tryConfigure(data: ByteArray, isH265: Boolean) {
@@ -95,11 +140,16 @@ class AirPlayVideoRenderer(
         if (isH265) {
             val all = concat(pendingParamSets)
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(all))
+            val sps265 = pendingParamSets.first { isNalType(it, true, 33) }
+            activeSps = sps265.copyOfRange(4, sps265.size)
         } else {
             val sps = pendingParamSets.first { isNalType(it, false, 7) }
             val pps = pendingParamSets.first { isNalType(it, false, 8) }
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(sps))
             format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(pps))
+            // Stored without the 4-byte start code withStartCode() added,
+            // to compare like-for-like against extractNal()'s raw payload.
+            activeSps = sps.copyOfRange(4, sps.size)
         }
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
 

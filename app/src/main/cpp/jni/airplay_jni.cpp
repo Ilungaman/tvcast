@@ -9,9 +9,10 @@
  * uxplay.cpp's GStreamer-based renderer.
  *
  * Phase 1 confirmed pairing + the RTSP/RTP session against a real iPhone.
- * Phase 2 (this file, now): video frames are forwarded to Kotlin's
- * AirPlayBridge, which feeds them into a MediaCodec decoder onto a Surface.
- * Audio is still not wired up.
+ * Phase 2 forwards video frames to Kotlin's AirPlayBridge, which feeds them
+ * into a MediaCodec decoder onto a Surface. Phase 3 (this file, now) does
+ * the same for audio (AAC-ELD, 44100/stereo -- see AirPlayAudioRenderer.kt
+ * for where that format comes from).
  *
  * raop_callbacks_t fires on UxPlay's own internal worker threads, never on
  * a thread already attached to the JVM, so every callback that needs to
@@ -52,6 +53,7 @@ JNIEnv *attachCurrentThread() {
 
 jclass g_bridgeClass = nullptr;
 jmethodID g_onVideoFrame = nullptr;
+jmethodID g_onAudioFrame = nullptr;
 jmethodID g_onMirrorStateChanged = nullptr;
 
 /* Must be called from JNI_OnLoad (i.e. on the thread that called
@@ -72,8 +74,9 @@ void cacheBridge(JNIEnv *env) {
     g_bridgeClass = (jclass) env->NewGlobalRef(local);
     env->DeleteLocalRef(local);
     g_onVideoFrame = env->GetStaticMethodID(g_bridgeClass, "onVideoFrame", "([BZJ)V");
+    g_onAudioFrame = env->GetStaticMethodID(g_bridgeClass, "onAudioFrame", "([BIJ)V");
     g_onMirrorStateChanged = env->GetStaticMethodID(g_bridgeClass, "onMirrorStateChanged", "(Z)V");
-    if (!g_onVideoFrame || !g_onMirrorStateChanged) {
+    if (!g_onVideoFrame || !g_onAudioFrame || !g_onMirrorStateChanged) {
         LOGE("AirPlayBridge methods not found");
         env->ExceptionClear();
     } else {
@@ -108,9 +111,21 @@ void log_callback(void *cls, int level, const char *msg) {
 /* ---- raop_callbacks_t ---- */
 
 void cb_audio_process(void *cls, raop_ntp_t *ntp, audio_decode_struct *data) {
-    // Not decoded yet -- only video is wired up to MediaCodec so far.
     (void) cls; (void) ntp;
-    LOGI("audio frame: %d bytes, ct=%d", data->data_len, data->ct);
+    JNIEnv *env = attachCurrentThread();
+    if (!env) return;
+    if (!g_onAudioFrame) return;
+
+    jbyteArray arr = env->NewByteArray(data->data_len);
+    if (!arr) {
+        env->ExceptionClear();
+        return;
+    }
+    env->SetByteArrayRegion(arr, 0, data->data_len, reinterpret_cast<jbyte *>(data->data));
+    env->CallStaticVoidMethod(g_bridgeClass, g_onAudioFrame, arr,
+                               (jint) data->ct, (jlong) data->ntp_time_remote);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(arr);
 }
 
 void cb_video_process(void *cls, raop_ntp_t *ntp, video_decode_struct *data) {

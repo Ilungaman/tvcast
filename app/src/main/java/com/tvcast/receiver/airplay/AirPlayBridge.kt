@@ -15,6 +15,7 @@ object AirPlayBridge {
 
     interface Listener {
         fun onVideoFrame(data: ByteArray, isH265: Boolean, ntpTimeRemote: Long)
+        fun onAudioFrame(data: ByteArray, ct: Int, ntpTimeRemote: Long)
         fun onMirrorStateChanged(running: Boolean)
     }
 
@@ -24,6 +25,11 @@ object AirPlayBridge {
     @JvmStatic
     fun onVideoFrame(data: ByteArray, isH265: Boolean, ntpTimeRemote: Long) {
         listener?.onVideoFrame(data, isH265, ntpTimeRemote)
+    }
+
+    @JvmStatic
+    fun onAudioFrame(data: ByteArray, ct: Int, ntpTimeRemote: Long) {
+        listener?.onAudioFrame(data, ct, ntpTimeRemote)
     }
 
     @JvmStatic

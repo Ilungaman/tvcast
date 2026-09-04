@@ -18,6 +18,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import com.tvcast.receiver.airplay.AirPlayAudioRenderer
 import com.tvcast.receiver.airplay.AirPlayBridge
 import com.tvcast.receiver.airplay.AirPlayVideoRenderer
 import com.tvcast.receiver.databinding.ActivityMainBinding
@@ -37,7 +38,12 @@ class MainActivity : AppCompatActivity() {
     private var toastJob: Job? = null
     private var photoJob: Job? = null
 
-    private var airplayRenderer: AirPlayVideoRenderer? = null
+    // Written from the UI thread (surface lifecycle / mirror state), read
+    // from UxPlay's native callback threads (video and audio each get
+    // their own) -- @Volatile so a freshly assigned renderer is visible
+    // across threads without a full lock for what's just a reference swap.
+    @Volatile private var airplayRenderer: AirPlayVideoRenderer? = null
+    @Volatile private var airplayAudioRenderer: AirPlayAudioRenderer? = null
     private var mirroring = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,12 +117,22 @@ class MainActivity : AppCompatActivity() {
 
         AirPlayBridge.listener = object : AirPlayBridge.Listener {
             // Called on UxPlay's native callback thread -- decode work stays
-            // off the UI thread on purpose, AirPlayVideoRenderer is thread-safe.
+            // off the UI thread on purpose, both renderers are thread-safe.
             override fun onVideoFrame(data: ByteArray, isH265: Boolean, ntpTimeRemote: Long) {
                 airplayRenderer?.feed(data, isH265)
             }
 
+            override fun onAudioFrame(data: ByteArray, ct: Int, ntpTimeRemote: Long) {
+                airplayAudioRenderer?.feed(data, ct)
+            }
+
             override fun onMirrorStateChanged(running: Boolean) {
+                if (running) {
+                    airplayAudioRenderer = AirPlayAudioRenderer()
+                } else {
+                    airplayAudioRenderer?.stop()
+                    airplayAudioRenderer = null
+                }
                 runOnUiThread {
                     mirroring = running
                     if (running) showAirPlay() else showIdle()
@@ -474,6 +490,8 @@ class MainActivity : AppCompatActivity() {
         AirPlayBridge.listener = null
         airplayRenderer?.stop()
         airplayRenderer = null
+        airplayAudioRenderer?.stop()
+        airplayAudioRenderer = null
         if (isFinishing) ServerService.stop(this)
         super.onDestroy()
     }
