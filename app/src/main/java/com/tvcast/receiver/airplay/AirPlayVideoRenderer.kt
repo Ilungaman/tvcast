@@ -124,14 +124,29 @@ class AirPlayVideoRenderer(
      * however our own processing happened to be spaced -- letting
      * SurfaceFlinger's timed presentation absorb small timing variance
      * instead of showing it as judder.
+     *
+     * That alone isn't enough during a sustained burst of complex frames
+     * (confirmed against the real TV: smooth on calm motion, tearing during
+     * a camera pan, smooth again once it slows). Panning frames carry more
+     * motion data and take longer to decode on this device -- if decode
+     * genuinely can't keep up for a stretch, frames' scheduled times drift
+     * further into the past every frame, and a past timestamp renders
+     * immediately, so the backlog dumps onto the screen in one catch-up
+     * burst the moment decode gets a chance to run. Once the drift passes
+     * MAX_LAG_NS, resync the anchor to now instead of dutifully replaying
+     * the growing backlog at its original spacing -- trading exact frame
+     * timing (briefly discarding the lag) for staying visually smooth.
      */
     private fun scheduleRenderTime(presentationTimeUs: Long): Long {
         val ptsNs = presentationTimeUs * 1000L
-        if (firstFramePtsNs < 0) {
+        val nowNs = System.nanoTime()
+        val scheduledNs = firstRenderAtNs + (ptsNs - firstFramePtsNs)
+        if (firstFramePtsNs < 0 || scheduledNs < nowNs - MAX_LAG_NS) {
             firstFramePtsNs = ptsNs
-            firstRenderAtNs = System.nanoTime() + RENDER_BUFFER_NS
+            firstRenderAtNs = nowNs + RENDER_BUFFER_NS
+            return firstRenderAtNs
         }
-        return firstRenderAtNs + (ptsNs - firstFramePtsNs)
+        return scheduledNs
     }
 
     /**
@@ -277,5 +292,12 @@ class AirPlayVideoRenderer(
         // end-to-end latency; kept small since this is mirroring, not a
         // playback buffer.
         private const val RENDER_BUFFER_NS = 100_000_000L // 100ms
+
+        // How far a scheduled frame is allowed to drift into the past
+        // before scheduleRenderTime() gives up on the original spacing and
+        // resyncs the clock to now. Bigger than RENDER_BUFFER_NS so normal
+        // jitter never triggers it -- only a real, sustained decode
+        // backlog does.
+        private const val MAX_LAG_NS = 250_000_000L // 250ms
     }
 }
