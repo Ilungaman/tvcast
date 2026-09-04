@@ -323,20 +323,23 @@ class AirPlayVideoRenderer(
         // dropping the oldest one. Roughly matches RENDER_BUFFER_NS at a
         // typical mirroring frame rate -- enough to absorb a short burst
         // without letting a real backlog grow unbounded.
-        private const val QUEUE_CAPACITY = 4
+        private const val QUEUE_CAPACITY = 8
 
         // How far into the future the first frame of a decode session is
-        // scheduled, giving later frames room to absorb decode jitter
-        // without visibly slipping. Adds the same amount of end-to-end
-        // latency; kept small since this is mirroring, not a playback
-        // buffer.
-        private const val RENDER_BUFFER_NS = 100_000_000L // 100ms
+        // scheduled, giving later frames room to absorb arrival/decode
+        // timing variance without visibly slipping. Adds the same amount
+        // of end-to-end latency. Raised from 100ms to 300ms after
+        // real-device testing showed 100ms wasn't enough headroom to
+        // fully absorb this device's mirroring jitter -- traded for more
+        // lag since this is mirroring (no interaction to feel delayed),
+        // not a playback buffer.
+        private const val RENDER_BUFFER_NS = 300_000_000L // 300ms
 
         // How far a scheduled frame is allowed to drift into the past
         // before scheduleRenderTime() gives up on the original spacing and
         // resyncs the clock to now. Bigger than RENDER_BUFFER_NS so normal
         // jitter never triggers it -- only a real, sustained decode
         // backlog does.
-        private const val MAX_LAG_NS = 250_000_000L // 250ms
+        private const val MAX_LAG_NS = 600_000_000L // 600ms
     }
 }
