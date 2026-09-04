@@ -46,10 +46,22 @@ class AirPlayVideoRenderer(
 
     private data class Frame(val data: ByteArray, val isH265: Boolean)
 
-    // Bounded so a real decode backlog can't grow memory or latency
-    // without limit -- dropping the oldest queued frame is cheap and, once
-    // the render clock is behind by more than MAX_LAG_NS anyway, that
-    // frame was headed for a resync discard on the output side regardless.
+    // Bounded only as a last-resort safety valve against a genuinely
+    // wedged decode thread -- NOT as a routine smoothing mechanism.
+    // Confirmed against the real TV: dropping the oldest queued frame here
+    // under normal backpressure caused visible ghosting/residual image
+    // fragments while scrolling. Most H.264 frames are P-frames that only
+    // encode a delta against the previously decoded frame; skipping one
+    // from the middle of that chain doesn't just lose a frame, it corrupts
+    // every frame decoded afterward until the next full keyframe, which is
+    // exactly what stale/ghosted content looks like. QUEUE_CAPACITY is
+    // sized generously (see companion object) so this path should
+    // essentially never trigger given decode has already been shown to
+    // keep up in practice (the local flash-drive comparison) -- a stale
+    // backlog is instead handled without corruption by scheduleRenderTime()
+    // resyncing the *display* clock once it's fallen too far behind,
+    // letting every frame still get decoded correctly even if some end up
+    // shown back-to-back while catching up.
     private val queue = ArrayBlockingQueue<Frame>(QUEUE_CAPACITY)
 
     @Volatile
@@ -320,10 +332,13 @@ class AirPlayVideoRenderer(
 
         // How many compressed frames can queue up between the native
         // callback thread and the decode thread before feed() starts
-        // dropping the oldest one. Roughly matches RENDER_BUFFER_NS at a
-        // typical mirroring frame rate -- enough to absorb a short burst
-        // without letting a real backlog grow unbounded.
-        private const val QUEUE_CAPACITY = 8
+        // dropping the oldest one -- see the comment on [queue] for why
+        // that path is meant to be an unreachable-in-practice safety
+        // valve, not routine backpressure handling. Sized generously
+        // (~5s at a typical mirroring frame rate) so it stays that way;
+        // the resulting worst-case memory use is trivial for compressed
+        // H.264/H.265 access units.
+        private const val QUEUE_CAPACITY = 150
 
         // How far into the future the first frame of a decode session is
         // scheduled, giving later frames room to absorb arrival/decode
