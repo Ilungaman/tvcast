@@ -100,8 +100,39 @@ class AirPlayVideoRenderer(
         return fmt.getInteger(MediaFormat.KEY_WIDTH) to fmt.getInteger(MediaFormat.KEY_HEIGHT)
     }
 
+    /**
+     * Cheap pre-check before paying for a full splitAnnexB() scan: reads
+     * only the NAL type byte right after the FIRST start code (SPS, when
+     * present at all, is conventionally the lead NAL of a keyframe
+     * packet). Runs on every single video frame once configured, so this
+     * has to stay O(few bytes), not O(frame size) -- a full per-frame scan
+     * here was enough to fall behind on weaker (armeabi-v7a) hardware and
+     * starve the decoder, which showed up as a black/frozen screen.
+     */
+    private fun firstNalType(data: ByteArray, isH265: Boolean): Int? {
+        var i = 0
+        while (i + 3 < data.size) {
+            if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) {
+                if (data[i + 2] == 1.toByte()) {
+                    val p = i + 3
+                    if (p >= data.size) return null
+                    return if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
+                }
+                if (i + 4 < data.size && data[i + 2] == 0.toByte() && data[i + 3] == 1.toByte()) {
+                    val p = i + 4
+                    if (p >= data.size) return null
+                    return if (isH265) (data[p].toInt() shr 1) and 0x3F else data[p].toInt() and 0x1F
+                }
+            }
+            i++
+        }
+        return null
+    }
+
     private fun resolutionChanged(data: ByteArray, isH265: Boolean): Boolean {
-        val sps = extractNal(data, isH265, if (isH265) 33 else 7) ?: return false
+        val wantType = if (isH265) 33 else 7
+        if (firstNalType(data, isH265) != wantType) return false
+        val sps = extractNal(data, isH265, wantType) ?: return false
         val prev = activeSps ?: return false
         return !sps.contentEquals(prev)
     }

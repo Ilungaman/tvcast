@@ -73,12 +73,18 @@ void cacheBridge(JNIEnv *env) {
     }
     g_bridgeClass = (jclass) env->NewGlobalRef(local);
     env->DeleteLocalRef(local);
+    // GetStaticMethodID throws (and leaves pending) NoSuchMethodError on a
+    // miss; calling another JNI function afterwards with that exception
+    // still pending is undefined behavior (fatal on many ART builds), so
+    // each lookup gets its own clear rather than one at the very end.
     g_onVideoFrame = env->GetStaticMethodID(g_bridgeClass, "onVideoFrame", "([BZJ)V");
+    if (env->ExceptionCheck()) env->ExceptionClear();
     g_onAudioFrame = env->GetStaticMethodID(g_bridgeClass, "onAudioFrame", "([BIJ)V");
+    if (env->ExceptionCheck()) env->ExceptionClear();
     g_onMirrorStateChanged = env->GetStaticMethodID(g_bridgeClass, "onMirrorStateChanged", "(Z)V");
+    if (env->ExceptionCheck()) env->ExceptionClear();
     if (!g_onVideoFrame || !g_onAudioFrame || !g_onMirrorStateChanged) {
         LOGE("AirPlayBridge methods not found");
-        env->ExceptionClear();
     } else {
         LOGI("AirPlayBridge cached OK");
     }
