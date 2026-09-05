@@ -136,9 +136,24 @@ void cb_audio_process(void *cls, raop_ntp_t *ntp, audio_decode_struct *data) {
 
 void cb_video_process(void *cls, raop_ntp_t *ntp, video_decode_struct *data) {
     (void) cls; (void) ntp;
+    if (!g_onVideoFrame) return;
+
+    /* Per UxPlay's own reference renderer (renderers/video_renderer.c):
+     * valid H.264/H.265 data always starts with a NAL start code, whose
+     * first byte is 0x00. When raop_rtp_mirror.c's packet decryption or
+     * NAL-parsing validation fails, it does not drop the callback -- it
+     * marks the packet by setting data[0] to 0x01 instead and still calls
+     * video_process with it. The reference renderer checks for exactly
+     * this and discards the packet; we were never checking it at all,
+     * feeding UxPlay's own "this data is corrupted" packets straight into
+     * the decoder, which is what showed up as blocky/mosaic corruption on
+     * both mirrored video and photos. */
+    if (data->data_len < 1 || data->data[0] != 0) {
+        return;
+    }
+
     JNIEnv *env = attachCurrentThread();
     if (!env) return;
-    if (!g_onVideoFrame) return;
 
     jbyteArray arr = env->NewByteArray(data->data_len);
     if (!arr) {
