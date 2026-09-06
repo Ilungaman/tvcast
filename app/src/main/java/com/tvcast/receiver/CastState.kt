@@ -9,7 +9,8 @@ data class MediaEntry(
     val name: String,
     val mime: String,
     val size: Long,
-    val addedAt: Long
+    val addedAt: Long,
+    val caption: String = ""
 ) {
     /** Всё, что не картинка, отдаём в ExoPlayer — он сам определит контейнер. */
     val isVideo: Boolean get() = !mime.startsWith("image/")
@@ -58,6 +59,11 @@ object CastState {
     /** "off" | "days" | "count" -- see MediaRepo.applyAutoCleanup(). */
     val autoCleanupMode = MutableStateFlow("off")
     val autoCleanupValue = MutableStateFlow(30)
+    /** Off by default -- when on, the upload page offers a "from whom" caption field. */
+    val captionsEnabled = MutableStateFlow(false)
+    /** Off by default -- when on, a category is picked and background music loops during slideshow. */
+    val musicEnabled = MutableStateFlow(false)
+    val musicCategory = MutableStateFlow("calm")
     val muted = MutableStateFlow(false)
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")

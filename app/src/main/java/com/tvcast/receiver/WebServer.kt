@@ -97,15 +97,26 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 post("/api/upload") {
                     if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@post }
                     val saved = JSONArray()
+                    // The web client appends the "caption" form field before the
+                    // "file" field in the same request, so by the time forEachPart
+                    // reaches the FileItem, caption already holds this batch's text
+                    // (blank if the caption feature is off or left empty).
+                    var caption = ""
                     try {
                         val multipart = call.receiveMultipart()
                         multipart.forEachPart { part ->
-                            if (part is PartData.FileItem) {
-                                val name = part.originalFileName ?: "file"
-                                val entry = withContext(Dispatchers.IO) {
-                                    part.streamProvider().use { MediaRepo.save(name, it) }
+                            when (part) {
+                                is PartData.FormItem -> {
+                                    if (part.name == "caption") caption = part.value
                                 }
-                                saved.put(entry.id)
+                                is PartData.FileItem -> {
+                                    val name = part.originalFileName ?: "file"
+                                    val entry = withContext(Dispatchers.IO) {
+                                        part.streamProvider().use { MediaRepo.save(name, it, caption) }
+                                    }
+                                    saved.put(entry.id)
+                                }
+                                else -> {}
                             }
                             part.dispose()
                         }
@@ -216,6 +227,11 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 CastState.autoCleanupValue.value = body.optInt("value", 30).coerceAtLeast(1)
                 withContext(Dispatchers.IO) { MediaRepo.refresh() }
             }
+            "captions" -> CastState.captionsEnabled.value = body.optBoolean("on")
+            "music" -> {
+                CastState.musicEnabled.value = body.optBoolean("on")
+                CastState.musicCategory.value = body.optString("category", "calm")
+            }
             "delete" -> {
                 val id = body.optString("id")
                 if (CastState.currentId.value == id) CastState.commands.emit(Command.Stop)
@@ -240,6 +256,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                     .put("size", e.size)
                     .put("isVideo", e.isVideo)
                     .put("addedAt", e.addedAt)
+                    .put("caption", e.caption)
             )
         }
         return JSONObject()
@@ -253,6 +270,9 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("transition", CastState.transitionEffect.value.name.lowercase())
             .put("cleanupMode", CastState.autoCleanupMode.value)
             .put("cleanupValue", CastState.autoCleanupValue.value)
+            .put("captionsEnabled", CastState.captionsEnabled.value)
+            .put("musicEnabled", CastState.musicEnabled.value)
+            .put("musicCategory", CastState.musicCategory.value)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })

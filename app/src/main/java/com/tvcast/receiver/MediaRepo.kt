@@ -43,11 +43,31 @@ object MediaRepo {
                     name = f.name.substringAfter('~'),
                     mime = mimeOf(f.name),
                     size = f.length(),
-                    addedAt = f.name.substringBefore('-').toLongOrNull() ?: f.lastModified()
+                    addedAt = f.name.substringBefore('-').toLongOrNull() ?: f.lastModified(),
+                    caption = captionOf(f.name)
                 )
             }
             .sortedBy { it.addedAt }
         CastState.items.value = list
+    }
+
+    // ------------------------------------------------------------- подписи
+
+    /**
+     * Filenames already carry the original name and timestamp (see the
+     * class doc), but an arbitrary free-text caption doesn't fit that
+     * scheme safely -- stored instead as a small id -> text map, the same
+     * SharedPreferences pattern PinAuth/AirPlayReceiver already use.
+     */
+    private val captionPrefs by lazy {
+        appContext.getSharedPreferences("tvcast_captions", Context.MODE_PRIVATE)
+    }
+
+    private fun captionOf(id: String): String = captionPrefs.getString(id, "").orEmpty()
+
+    private fun setCaption(id: String, caption: String) {
+        if (caption.isBlank()) return
+        captionPrefs.edit().putString(id, caption.trim().take(200)).apply()
     }
 
     /**
@@ -84,6 +104,7 @@ object MediaRepo {
             if (CastState.currentId.value == id) CastState.commands.tryEmit(Command.Stop)
             f.delete()
             File(thumbDir, "$id.jpg").delete()
+            captionPrefs.edit().remove(id).apply()
         }
     }
 
@@ -97,7 +118,7 @@ object MediaRepo {
     fun entryOf(id: String): MediaEntry? = CastState.items.value.firstOrNull { it.id == id }
 
     /** Потоковая запись загружаемого файла — без буферизации целиком в памяти. */
-    fun save(originalName: String, input: InputStream): MediaEntry {
+    fun save(originalName: String, input: InputStream, caption: String = ""): MediaEntry {
         val clean = sanitize(originalName)
         val id = "${System.currentTimeMillis()}-${(1000..9999).random()}~$clean"
         val target = File(mediaDir, id)
@@ -110,14 +131,16 @@ object MediaRepo {
             }
             out.flush()
         }
+        setCaption(id, caption)
         refresh()
-        return entryOf(id) ?: MediaEntry(id, clean, mimeOf(clean), target.length(), System.currentTimeMillis())
+        return entryOf(id) ?: MediaEntry(id, clean, mimeOf(clean), target.length(), System.currentTimeMillis(), caption)
     }
 
     fun delete(id: String): Boolean {
         val f = fileOf(id) ?: return false
         val ok = f.delete()
         File(thumbDir, "$id.jpg").delete()
+        captionPrefs.edit().remove(id).apply()
         refresh()
         return ok
     }
@@ -125,6 +148,7 @@ object MediaRepo {
     fun deleteAll() {
         mediaDir.listFiles()?.forEach { it.delete() }
         thumbDir.listFiles()?.forEach { it.delete() }
+        captionPrefs.edit().clear().apply()
         refresh()
     }
 

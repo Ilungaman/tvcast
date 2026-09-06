@@ -200,6 +200,34 @@
             android:textSize="15sp" />
     </LinearLayout>
 
+    <!-- Часы и погода: видны на экране ожидания и в скринсейвере -->
+    <LinearLayout
+        android:id="@+id/ambientInfo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="28dp"
+        android:gravity="end"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/clockText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/weatherText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#B9C4CF"
+            android:textSize="16sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
     <!-- Плашка с именем файла -->
     <TextView
         android:id="@+id/titleOverlay"

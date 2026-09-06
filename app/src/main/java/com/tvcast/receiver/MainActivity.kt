@@ -35,6 +35,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 class MainActivity : AppCompatActivity() {
@@ -52,6 +56,16 @@ class MainActivity : AppCompatActivity() {
     private var frontIsA = true
     private var photoAnimator: Animator? = null
 
+    // Hybrid screensaver: after IDLE_TIMEOUT_MS with nothing happening on
+    // the idle screen, either loop the photo library ambiently (if it has
+    // any photos) or dim the idle screen to a blank black background --
+    // both avoid burning the static QR/URL/PIN text into this TV's panel.
+    private var idleTimeoutJob: Job? = null
+    private var screensaverJob: Job? = null
+    private var screensaverActive = false
+    private var clockJob: Job? = null
+    private var weatherJob: Job? = null
+
     // Written from the UI thread (surface lifecycle / mirror state), read
     // from UxPlay's native callback threads (video and audio each get
     // their own) -- @Volatile so a freshly assigned renderer is visible
@@ -59,6 +73,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var airplayRenderer: AirPlayVideoRenderer? = null
     @Volatile private var airplayAudioRenderer: AirPlayAudioRenderer? = null
     private var mirroring = false
+
+    companion object {
+        private const val IDLE_TIMEOUT_MS = 3 * 60_000L
+        private const val SCREENSAVER_INTERVAL_MS = 8_000L
+        private const val WEATHER_REFRESH_MS = 30 * 60_000L
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +91,7 @@ class MainActivity : AppCompatActivity() {
         setupPlayer()
         setupAirPlay()
         showIdle()
+        startAmbientUpdaters()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -156,10 +177,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAirPlay() {
+        disarmIdleTimeout()
         photoJob?.cancel()
         slideshowJob?.cancel()
         player?.pause()
         b.idleView.visibility = View.GONE
+        b.ambientInfo.visibility = View.GONE
         b.playerView.visibility = View.GONE
         resetPhotoViews()
         b.titleOverlay.visibility = View.GONE
@@ -221,6 +244,7 @@ class MainActivity : AppCompatActivity() {
     // --------------------------------------------------------------- команды
 
     private fun handle(cmd: Command) {
+        if (screensaverActive) exitScreensaver()
         val p = player
         when (cmd) {
             is Command.Show -> show(cmd.id)
@@ -283,6 +307,7 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------ отображение
 
     private fun show(id: String) {
+        disarmIdleTimeout()
         val entry = MediaRepo.entryOf(id) ?: run {
             MediaRepo.refresh()
             MediaRepo.entryOf(id)
@@ -292,8 +317,10 @@ class MainActivity : AppCompatActivity() {
         CastState.currentId.value = id
         CastState.lastError.value = ""
         b.idleView.visibility = View.GONE
+        b.ambientInfo.visibility = View.GONE
         b.airplaySurface.visibility = View.GONE
-        showTitle(entry.name)
+        val caption = entry.caption
+        showTitle(if (CastState.captionsEnabled.value && caption.isNotBlank()) caption else entry.name)
 
         if (entry.isVideo) {
             photoJob?.cancel()
@@ -417,6 +444,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdle() {
+        screensaverJob?.cancel()
+        screensaverJob = null
+        screensaverActive = false
         photoJob?.cancel()
         slideshowJob?.cancel()
         player?.pause()
@@ -429,8 +459,85 @@ class MainActivity : AppCompatActivity() {
         resetPhotoViews()
         b.airplaySurface.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
+        b.idleView.alpha = 1f
         b.idleView.visibility = View.VISIBLE
+        b.ambientInfo.visibility = View.VISIBLE
         renderIdleInfo()
+        armIdleTimeout()
+    }
+
+    // ------------------------------------------------------------ скринсейвер
+
+    private fun armIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = lifecycleScope.launch {
+            delay(IDLE_TIMEOUT_MS)
+            startScreensaver()
+        }
+    }
+
+    private fun disarmIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = null
+    }
+
+    private fun startScreensaver() {
+        if (screensaverActive || mirroring || CastState.currentId.value != null) return
+        screensaverActive = true
+        val photos = CastState.items.value.filter { !it.isVideo }
+        if (photos.isEmpty()) {
+            // Пустая библиотека -- гасим экран, чтобы не выжигать статичный QR/PIN.
+            b.idleView.animate().alpha(0f).setDuration(1500).start()
+            return
+        }
+        b.idleView.visibility = View.GONE
+        screensaverJob = lifecycleScope.launch {
+            var idx = 0
+            while (true) {
+                val entry = photos[idx % photos.size]
+                val file = MediaRepo.fileOf(entry.id)
+                if (file != null) {
+                    val bmp = withContext(Dispatchers.IO) { decodePhoto(file) }
+                    if (bmp != null) showPhotoWithTransition(bmp)
+                }
+                idx++
+                delay(SCREENSAVER_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun exitScreensaver() {
+        if (!screensaverActive) return
+        screensaverActive = false
+        screensaverJob?.cancel()
+        screensaverJob = null
+        showIdle()
+    }
+
+    // ------------------------------------------------------- часы и погода
+
+    private fun startAmbientUpdaters() {
+        clockJob?.cancel()
+        clockJob = lifecycleScope.launch {
+            val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+            while (true) {
+                b.clockText.text = fmt.format(Date())
+                delay(30_000L)
+            }
+        }
+        weatherJob?.cancel()
+        weatherJob = lifecycleScope.launch {
+            while (true) {
+                val info = WeatherProvider.fetch()
+                if (info != null) {
+                    b.weatherText.text = "${info.emoji} ${info.tempC.roundToInt()}°  ${info.city}"
+                    b.weatherText.visibility = View.VISIBLE
+                } else {
+                    b.weatherText.visibility = View.GONE
+                }
+                delay(WEATHER_REFRESH_MS)
+            }
+        }
     }
 
     private fun renderIdleInfo() {
@@ -543,6 +650,10 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------ пульт от ТВ
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (screensaverActive) {
+            exitScreensaver()
+            return true
+        }
         val idle = b.idleView.visibility == View.VISIBLE
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
@@ -595,6 +706,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         slideshowJob?.cancel()
         photoJob?.cancel()
+        idleTimeoutJob?.cancel()
+        screensaverJob?.cancel()
+        clockJob?.cancel()
+        weatherJob?.cancel()
         player?.release()
         player = null
         b.playerView.player = null
