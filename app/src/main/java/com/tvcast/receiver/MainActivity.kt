@@ -66,6 +66,14 @@ class MainActivity : AppCompatActivity() {
     private var clockJob: Job? = null
     private var weatherJob: Job? = null
 
+    // Background "atmospheric" music: a second, independent ExoPlayer so it
+    // never fights the main one over MediaItem/prepare() state, looping a
+    // shuffled queue of the user's own tracks (see MusicRepo) at low volume
+    // for as long as photos are on screen (manual slideshow or screensaver).
+    private var musicPlayer: ExoPlayer? = null
+    private var musicQueue: List<File> = emptyList()
+    private var musicIdx = 0
+
     // Written from the UI thread (surface lifecycle / mirror state), read
     // from UxPlay's native callback threads (video and audio each get
     // their own) -- @Volatile so a freshly assigned renderer is visible
@@ -99,6 +107,8 @@ class MainActivity : AppCompatActivity() {
                 launch { CastState.serverUrl.collect { renderIdleInfo() } }
                 launch { CastState.lastError.collect { renderIdleInfo() } }
                 launch { CastState.items.collect { renderIdleInfo() } }
+                launch { CastState.musicEnabled.collect { onMusicSettingChanged() } }
+                launch { CastState.musicCategory.collect { onMusicSettingChanged() } }
                 launch { positionTicker() }
             }
         }
@@ -178,6 +188,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAirPlay() {
         disarmIdleTimeout()
+        stopBackgroundMusic()
+        screensaverJob?.cancel()
+        screensaverJob = null
+        screensaverActive = false
         photoJob?.cancel()
         slideshowJob?.cancel()
         player?.pause()
@@ -323,6 +337,7 @@ class MainActivity : AppCompatActivity() {
         showTitle(if (CastState.captionsEnabled.value && caption.isNotBlank()) caption else entry.name)
 
         if (entry.isVideo) {
+            stopBackgroundMusic()
             photoJob?.cancel()
             resetPhotoViews()
             b.playerView.visibility = View.VISIBLE
@@ -351,6 +366,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             restartSlideshow()
+            startBackgroundMusic()
         }
     }
 
@@ -444,6 +460,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdle() {
+        stopBackgroundMusic()
         screensaverJob?.cancel()
         screensaverJob = null
         screensaverActive = false
@@ -491,6 +508,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         b.idleView.visibility = View.GONE
+        startBackgroundMusic()
         screensaverJob = lifecycleScope.launch {
             var idx = 0
             while (true) {
@@ -512,6 +530,55 @@ class MainActivity : AppCompatActivity() {
         screensaverJob?.cancel()
         screensaverJob = null
         showIdle()
+    }
+
+    // -------------------------------------------------------- фоновая музыка
+
+    private fun startBackgroundMusic() {
+        if (!CastState.musicEnabled.value) return
+        val tracks = MusicRepo.list(CastState.musicCategory.value)
+        if (tracks.isEmpty()) return
+        if (musicPlayer == null) {
+            musicPlayer = ExoPlayer.Builder(this).build().apply {
+                volume = 0.35f
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED) playNextMusicTrack()
+                    }
+                })
+            }
+        }
+        musicQueue = tracks.shuffled()
+        musicIdx = 0
+        playCurrentMusicTrack()
+    }
+
+    private fun playCurrentMusicTrack() {
+        val f = musicQueue.getOrNull(musicIdx) ?: return
+        musicPlayer?.apply {
+            setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(f)))
+            prepare()
+            play()
+        }
+    }
+
+    private fun playNextMusicTrack() {
+        if (musicQueue.isEmpty()) return
+        musicIdx = (musicIdx + 1) % musicQueue.size
+        playCurrentMusicTrack()
+    }
+
+    private fun stopBackgroundMusic() {
+        musicPlayer?.pause()
+        musicPlayer?.clearMediaItems()
+    }
+
+    /** Reacts to the on/off toggle or category change arriving live from the phone. */
+    private fun onMusicSettingChanged() {
+        if (!CastState.musicEnabled.value) { stopBackgroundMusic(); return }
+        val photoActive = (CastState.currentId.value != null && CastState.current()?.isVideo == false) ||
+            (screensaverActive && screensaverJob != null)
+        if (photoActive) startBackgroundMusic()
     }
 
     // ------------------------------------------------------- часы и погода
@@ -712,6 +779,8 @@ class MainActivity : AppCompatActivity() {
         weatherJob?.cancel()
         player?.release()
         player = null
+        musicPlayer?.release()
+        musicPlayer = null
         b.playerView.player = null
         AirPlayBridge.listener = null
         airplayRenderer?.stop()

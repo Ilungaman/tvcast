@@ -105,6 +105,13 @@
     if (s.cleanupValue && Number($('cleanupValue').value) !== s.cleanupValue) $('cleanupValue').value = String(s.cleanupValue);
     syncCleanupVisibility();
 
+    setChip($('captionsChip'), s.captionsEnabled, 'Подписи вкл.', 'Подписи выкл.');
+    $('captionInput').hidden = !s.captionsEnabled;
+
+    setChip($('musicChip'), s.musicEnabled, 'Музыка вкл.', 'Музыка выкл.');
+    if (s.musicCategory && s.musicCategory !== $('musicCategory').value) $('musicCategory').value = s.musicCategory;
+    if (s.musicTracks) buildMusicList(s.musicTracks);
+
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
     if (key !== lastGridKey) {
@@ -153,6 +160,56 @@
 
       tile.onclick = function () { cmd({ action: 'show', id: it.id }); };
       grid.appendChild(tile);
+    });
+  }
+
+  var MUSIC_CATEGORY_LABELS = { calm: 'Спокойная', upbeat: 'Ритмичная', nature: 'Природа', festive: 'Праздничная' };
+
+  var lastMusicKey = '';
+  function buildMusicList(tracksByCategory) {
+    var key = JSON.stringify(tracksByCategory);
+    if (key === lastMusicKey) return;
+    lastMusicKey = key;
+    var list = $('musicList');
+    list.innerHTML = '';
+    Object.keys(tracksByCategory).forEach(function (cat) {
+      var tracks = tracksByCategory[cat];
+      if (!tracks || !tracks.length) return;
+      var head = document.createElement('div');
+      head.className = 'hint';
+      head.textContent = (MUSIC_CATEGORY_LABELS[cat] || cat) + ':';
+      list.appendChild(head);
+      tracks.forEach(function (t) {
+        var row = document.createElement('div');
+        row.className = 'item';
+        var name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = t.name;
+        row.appendChild(name);
+        var del = document.createElement('button');
+        del.className = 'chip danger';
+        del.textContent = 'Удалить';
+        del.onclick = function () {
+          fetch('/api/music/' + encodeURIComponent(cat) + '/' + encodeURIComponent(t.id), { method: 'DELETE' })
+            .then(function (r) { return r.json(); }).then(function (s) { lastMusicKey = ''; render(s); }).catch(function () {});
+        };
+        row.appendChild(del);
+        list.appendChild(row);
+      });
+    });
+  }
+
+  function uploadMusic(files) {
+    if (!files || !files.length) return;
+    var category = $('musicCategory').value;
+    Array.prototype.slice.call(files).forEach(function (f) {
+      var fd = new FormData();
+      fd.append('category', category);
+      fd.append('file', f, f.name);
+      fetch('/api/music', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (s) { lastMusicKey = ''; render(s); toast('Трек добавлен'); })
+        .catch(function () { toast('Не удалось загрузить трек'); });
     });
   }
 
@@ -215,6 +272,9 @@
       var pct = row.querySelector('.pct');
 
       var fd = new FormData();
+      if (!$('captionInput').hidden && $('captionInput').value.trim()) {
+        fd.append('caption', $('captionInput').value.trim());
+      }
       fd.append('file', file, file.name);
 
       // A flat XHR timeout would abort a large, slow-but-still-progressing
@@ -299,7 +359,23 @@
       on: !(state && state.slideshow),
       interval: parseInt($('interval').value, 10) || 6
     });
+    else if (act === 'captions') cmd({ action: 'captions', on: !(state && state.captionsEnabled) });
+    else if (act === 'music') cmd({
+      action: 'music',
+      on: !(state && state.musicEnabled),
+      category: $('musicCategory').value
+    });
   });
+
+  $('musicCategory').addEventListener('change', function () {
+    cmd({
+      action: 'music',
+      on: !!(state && state.musicEnabled),
+      category: $('musicCategory').value
+    });
+  });
+
+  $('pickMusic').addEventListener('change', function (e) { uploadMusic(e.target.files); e.target.value = ''; });
 
   $('interval').addEventListener('change', function () {
     cmd({

@@ -135,6 +135,43 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                     )
                 }
 
+                // ---- загрузка фоновой музыки (по категориям) ----
+                post("/api/music") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@post }
+                    var category = "calm"
+                    try {
+                        val multipart = call.receiveMultipart()
+                        multipart.forEachPart { part ->
+                            when (part) {
+                                is PartData.FormItem -> {
+                                    if (part.name == "category") category = part.value
+                                }
+                                is PartData.FileItem -> {
+                                    val name = part.originalFileName ?: "track"
+                                    withContext(Dispatchers.IO) {
+                                        part.streamProvider().use { MusicRepo.save(category, name, it) }
+                                    }
+                                }
+                                else -> {}
+                            }
+                            part.dispose()
+                        }
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "music upload failed", t)
+                        call.respond(HttpStatusCode.InternalServerError, t.message ?: "upload error")
+                        return@post
+                    }
+                    call.respondText(stateJson().toString(), ContentType.Application.Json)
+                }
+
+                delete("/api/music/{category}/{id}") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@delete }
+                    val category = call.parameters["category"].orEmpty()
+                    val id = call.parameters["id"].orEmpty()
+                    MusicRepo.delete(category, id)
+                    call.respondText(stateJson().toString(), ContentType.Application.Json)
+                }
+
                 // ---- отдача файла с поддержкой Range (206 Partial Content) ----
                 get("/media/{id}") {
                     if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@get }
@@ -246,6 +283,14 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
     }
 
     private fun stateJson(): JSONObject {
+        val musicTracks = JSONObject()
+        for (cat in MusicRepo.CATEGORIES) {
+            val tracks = JSONArray()
+            for (f in MusicRepo.list(cat)) {
+                tracks.put(JSONObject().put("id", f.name).put("name", f.name.substringAfter('~')))
+            }
+            musicTracks.put(cat, tracks)
+        }
         val arr = JSONArray()
         for (e in CastState.items.value) {
             arr.put(
@@ -273,6 +318,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("captionsEnabled", CastState.captionsEnabled.value)
             .put("musicEnabled", CastState.musicEnabled.value)
             .put("musicCategory", CastState.musicCategory.value)
+            .put("musicTracks", musicTracks)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })

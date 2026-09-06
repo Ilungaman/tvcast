@@ -31,6 +31,7 @@
 <main>
 
   <section class="card pick">
+    <input id="captionInput" type="text" maxlength="200" placeholder="От кого (необязательно)" hidden>
     <label class="btn primary">
       Фото и видео
       <input id="pickMedia" type="file" accept="image/*,video/*" multiple>
@@ -126,7 +127,33 @@
       </label>
     </div>
     <p class="hint">«По времени» удаляет файлы старше указанного числа дней. «По количеству» оставляет только последние N файлов, остальные стираются автоматически.</p>
+    <div class="row">
+      <button class="chip" id="captionsChip" data-act="captions">Подписи выкл.</button>
+    </div>
+    <p class="hint">Когда включено, при отправке фото можно указать «от кого» — подпись покажется на экране вместо имени файла.</p>
     <button class="chip danger" id="clearBtn">Очистить всё сейчас</button>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Фоновая музыка</div>
+    <div class="row">
+      <button class="chip" id="musicChip" data-act="music">Музыка выкл.</button>
+      <label class="interval">
+        Категория
+        <select id="musicCategory">
+          <option value="calm" selected>Спокойная</option>
+          <option value="upbeat">Ритмичная</option>
+          <option value="nature">Природа</option>
+          <option value="festive">Праздничная</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint">Играет тихим фоном, пока на экране слайдшоу или скринсейвер. Загрузите несколько своих треков в категорию — как «атмосферная музыка» на iPhone.</p>
+    <label class="btn ghost">
+      Добавить трек в категорию
+      <input id="pickMusic" type="file" accept="audio/*" multiple>
+    </label>
+    <div id="musicList"></div>
   </section>
 
 </main>

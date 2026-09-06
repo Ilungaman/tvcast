@@ -46,6 +46,19 @@ main { padding: 16px; display: flex; flex-direction: column; gap: 14px; max-widt
 
 .pick { display: flex; flex-direction: column; gap: 10px; }
 
+#captionInput {
+  background: var(--card-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 13px 14px; font-size: 15px;
+}
+
+#musicList { margin-top: 10px; }
+#musicList .item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+#musicList .name { font-size: 14px; word-break: break-all; }
+
 .btn {
   display: block;
   text-align: center;
