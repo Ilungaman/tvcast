@@ -135,6 +135,34 @@
   </section>
 
   <section class="card">
+    <div class="card-title">Часы и погода</div>
+    <div class="row">
+      <label class="interval">
+        Стиль часов
+        <select id="clockStyle">
+          <option value="digital24" selected>24-часовой</option>
+          <option value="digital12">12-часовой (AM/PM)</option>
+          <option value="seconds">С секундами</option>
+        </select>
+      </label>
+      <label class="interval">
+        Размер шрифта
+        <select id="clockFontSize">
+          <option value="22">Маленький</option>
+          <option value="28" selected>Средний</option>
+          <option value="36">Крупный</option>
+          <option value="48">Очень крупный</option>
+        </select>
+      </label>
+      <label class="interval">
+        Цвет
+        <input id="clockColor" type="color" value="#ffffff">
+      </label>
+    </div>
+    <p class="hint">Часы и погода на экране ожидания периодически меняют место на экране, чтобы не выжигать пиксели телевизора. Время и погода определяются по IP-адресу телевизора, а не по системным часам устройства.</p>
+  </section>
+
+  <section class="card">
     <div class="card-title">Фоновая музыка</div>
     <div class="row">
       <button class="chip" id="musicChip" data-act="music">Музыка выкл.</button>

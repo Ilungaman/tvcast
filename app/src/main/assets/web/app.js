@@ -131,6 +131,10 @@
     if (s.musicCategory && s.musicCategory !== $('musicCategory').value) $('musicCategory').value = s.musicCategory;
     if (s.musicTracks) buildMusicList(s.musicTracks);
 
+    if (s.clockStyle && s.clockStyle !== $('clockStyle').value) $('clockStyle').value = s.clockStyle;
+    if (s.clockFontSize && Number($('clockFontSize').value) !== s.clockFontSize) $('clockFontSize').value = String(s.clockFontSize);
+    if (s.clockColor && s.clockColor !== $('clockColor').value) $('clockColor').value = s.clockColor;
+
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
     if (key !== lastGridKey) {
@@ -395,6 +399,18 @@
   });
 
   $('pickMusic').addEventListener('change', function (e) { uploadMusic(e.target.files); e.target.value = ''; });
+
+  function sendClockSettings() {
+    cmd({
+      action: 'clock',
+      style: $('clockStyle').value,
+      fontSize: parseInt($('clockFontSize').value, 10) || 28,
+      color: $('clockColor').value
+    });
+  }
+  $('clockStyle').addEventListener('change', sendClockSettings);
+  $('clockFontSize').addEventListener('change', sendClockSettings);
+  $('clockColor').addEventListener('change', sendClockSettings);
 
   $('interval').addEventListener('change', function () {
     cmd({

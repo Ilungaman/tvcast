@@ -64,6 +64,10 @@ object CastState {
     /** Off by default -- when on, a category is picked and background music loops during slideshow. */
     val musicEnabled = MutableStateFlow(false)
     val musicCategory = MutableStateFlow("calm")
+    /** "digital24" | "digital12" | "seconds" -- see MainActivity.formatClock(). */
+    val clockStyle = MutableStateFlow("digital24")
+    val clockFontSize = MutableStateFlow(28)
+    val clockColor = MutableStateFlow("#FFFFFF")
     val muted = MutableStateFlow(false)
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")

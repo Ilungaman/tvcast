@@ -38,6 +38,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
@@ -65,6 +66,25 @@ class MainActivity : AppCompatActivity() {
     private var screensaverActive = false
     private var clockJob: Job? = null
     private var weatherJob: Job? = null
+    private var clockMoveJob: Job? = null
+
+    // Anchors the ticking clock to the last IP-derived local time (see
+    // WeatherProvider) plus elapsed real time since -- not the device's own
+    // clock/timezone, which a TV can easily have wrong or never set.
+    // Seeded from the device clock only as a best-effort fallback until the
+    // first successful fetch.
+    private var clockAnchorEpochMs: Long = System.currentTimeMillis()
+    private var clockAnchorElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
+
+    // Cycled through periodically so the clock/weather overlay never sits
+    // in one spot long enough to burn into the panel.
+    private val clockPositions = listOf(
+        Gravity.TOP or Gravity.END,
+        Gravity.TOP or Gravity.START,
+        Gravity.BOTTOM or Gravity.END,
+        Gravity.BOTTOM or Gravity.START
+    )
+    private var clockPosIdx = 0
 
     // Background "atmospheric" music: a second, independent ExoPlayer so it
     // never fights the main one over MediaItem/prepare() state, looping a
@@ -89,6 +109,7 @@ class MainActivity : AppCompatActivity() {
         private const val SCREENSAVER_INTERVAL_MS = 8_000L
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
+        private const val CLOCK_MOVE_INTERVAL_MS = 5 * 60_000L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -619,10 +640,12 @@ class MainActivity : AppCompatActivity() {
     private fun startAmbientUpdaters() {
         clockJob?.cancel()
         clockJob = lifecycleScope.launch {
-            val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             while (true) {
-                b.clockText.text = fmt.format(Date())
-                delay(30_000L)
+                val nowMs = clockAnchorEpochMs + (android.os.SystemClock.elapsedRealtime() - clockAnchorElapsedMs)
+                b.clockText.text = formatClock(nowMs, CastState.clockStyle.value)
+                b.clockText.textSize = CastState.clockFontSize.value.toFloat()
+                b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
+                delay(1000L)
             }
         }
         weatherJob?.cancel()
@@ -632,12 +655,50 @@ class MainActivity : AppCompatActivity() {
                 if (info != null) {
                     b.weatherText.text = "${info.emoji} ${info.tempC.roundToInt()}°  ${info.city}"
                     b.weatherText.visibility = View.VISIBLE
+                    clockAnchorEpochMs = info.localEpochMs
+                    clockAnchorElapsedMs = android.os.SystemClock.elapsedRealtime()
                 } else {
                     b.weatherText.visibility = View.GONE
                 }
                 delay(WEATHER_REFRESH_MS)
             }
         }
+        clockMoveJob?.cancel()
+        clockMoveJob = lifecycleScope.launch {
+            while (true) {
+                delay(CLOCK_MOVE_INTERVAL_MS)
+                moveAmbientInfo()
+            }
+        }
+    }
+
+    private fun moveAmbientInfo() {
+        clockPosIdx = (clockPosIdx + 1) % clockPositions.size
+        val gravity = clockPositions[clockPosIdx]
+        b.ambientInfo.animate().alpha(0f).setDuration(400).withEndAction {
+            val lp = b.ambientInfo.layoutParams as FrameLayout.LayoutParams
+            lp.gravity = gravity
+            b.ambientInfo.layoutParams = lp
+            b.ambientInfo.gravity = if (gravity and Gravity.START == Gravity.START) Gravity.START else Gravity.END
+            b.ambientInfo.animate().alpha(1f).setDuration(400).start()
+        }.start()
+    }
+
+    private fun formatClock(epochMs: Long, style: String): String {
+        val pattern = when (style) {
+            "digital12" -> "hh:mm a"
+            "seconds" -> "HH:mm:ss"
+            else -> "HH:mm"
+        }
+        val fmt = SimpleDateFormat(pattern, Locale.getDefault())
+        fmt.timeZone = TimeZone.getTimeZone("UTC")
+        return fmt.format(Date(epochMs))
+    }
+
+    private fun parseClockColor(hex: String): Int = try {
+        android.graphics.Color.parseColor(hex)
+    } catch (t: Throwable) {
+        android.graphics.Color.WHITE
     }
 
     private fun renderIdleInfo() {
@@ -810,6 +871,7 @@ class MainActivity : AppCompatActivity() {
         screensaverJob?.cancel()
         clockJob?.cancel()
         weatherJob?.cancel()
+        clockMoveJob?.cancel()
         airplayScrimJob?.cancel()
         player?.release()
         player = null

@@ -272,6 +272,14 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 CastState.musicEnabled.value = body.optBoolean("on")
                 CastState.musicCategory.value = body.optString("category", "calm")
             }
+            "clock" -> {
+                val style = body.optString("style")
+                if (style.isNotBlank()) CastState.clockStyle.value = style
+                val fontSize = body.optInt("fontSize", -1)
+                if (fontSize > 0) CastState.clockFontSize.value = fontSize.coerceIn(14, 64)
+                val color = body.optString("color")
+                if (color.isNotBlank()) CastState.clockColor.value = color
+            }
             "delete" -> {
                 val id = body.optString("id")
                 if (CastState.currentId.value == id) CastState.commands.emit(Command.Stop)
@@ -322,6 +330,9 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("musicEnabled", CastState.musicEnabled.value)
             .put("musicCategory", CastState.musicCategory.value)
             .put("musicTracks", musicTracks)
+            .put("clockStyle", CastState.clockStyle.value)
+            .put("clockFontSize", CastState.clockFontSize.value)
+            .put("clockColor", CastState.clockColor.value)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })
