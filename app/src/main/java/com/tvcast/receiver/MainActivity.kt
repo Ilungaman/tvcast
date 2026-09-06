@@ -236,6 +236,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAirPlay() {
         disarmIdleTimeout()
         stopBackgroundMusic()
+        stopClockMotion()
         screensaverJob?.cancel()
         screensaverJob = null
         screensaverActive = false
@@ -550,6 +551,7 @@ class MainActivity : AppCompatActivity() {
         b.ambientInfo.animate().cancel()
         b.ambientInfo.alpha = 1f
         b.ambientInfo.visibility = View.VISIBLE
+        stopClockMotion()
         renderIdleInfo()
         armIdleTimeout()
     }
@@ -579,12 +581,18 @@ class MainActivity : AppCompatActivity() {
             // что её тоже нужно гасить явно: иначе именно часы, статичные и
             // самые маленькие/яркие на экране, окажутся ровно тем, что
             // выжигает OLED-панель, а не текстом, который мы гасим.
+            stopClockMotion()
             b.idleView.animate().alpha(0f).setDuration(1500).start()
             b.ambientInfo.animate().alpha(0f).setDuration(1500).start()
             return
         }
         b.idleView.visibility = View.GONE
-        b.ambientInfo.visibility = View.GONE
+        // На обычном экране ожидания часы стоят на месте (не мешают QR/PIN),
+        // а бегать по экрану начинают только здесь: в скринсейвере под ними
+        // долго крутятся фото, и без движения именно часы стали бы тем,
+        // что выжигает панель на длинной дистанции.
+        b.ambientInfo.visibility = View.VISIBLE
+        startClockMotion()
         startBackgroundMusic()
         screensaverJob = lifecycleScope.launch {
             var idx = 0
@@ -686,7 +694,17 @@ class MainActivity : AppCompatActivity() {
                 delay(WEATHER_REFRESH_MS)
             }
         }
+    }
+
+    /**
+     * The overlay only travels around the screen while the photo-loop
+     * screensaver is showing it over long stretches of rotating photos --
+     * on the plain idle screen it stays parked (see [stopClockMotion]) so
+     * it never drifts on top of the QR/URL/PIN text there.
+     */
+    private fun startClockMotion() {
         clockMoveJob?.cancel()
+        clockMotionStarted = false
         clockMoveJob = lifecycleScope.launch {
             val density = resources.displayMetrics.density
             val speedPx = CLOCK_SPEED_DP_PER_SEC * density
@@ -727,6 +745,27 @@ class MainActivity : AppCompatActivity() {
                 b.ambientInfo.translationX = x
                 b.ambientInfo.translationY = y
             }
+        }
+    }
+
+    /** Stops the travel and returns the overlay to its fixed top-right idle-screen spot. */
+    private fun stopClockMotion() {
+        clockMoveJob?.cancel()
+        clockMoveJob = null
+        bounceInited = false
+        wanderInited = false
+        clockMotionStarted = false
+        b.ambientInfo.post {
+            val density = resources.displayMetrics.density
+            val insetPx = CLOCK_EDGE_INSET_DP * density
+            val rootW = b.root.width
+            val viewW = b.ambientInfo.width
+            b.ambientInfo.translationX = if (rootW > 0 && viewW > 0) {
+                (rootW - viewW - insetPx).coerceAtLeast(insetPx)
+            } else {
+                0f
+            }
+            b.ambientInfo.translationY = insetPx
         }
     }
 
