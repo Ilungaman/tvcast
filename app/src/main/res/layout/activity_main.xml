@@ -6,9 +6,18 @@
     android:background="@android:color/black"
     android:keepScreenOn="true">
 
-    <!-- Фото -->
+    <!-- Фото: два слоя для перехода (кроссфейд/сдвиг между старым и новым) -->
     <ImageView
         android:id="@+id/photoView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:adjustViewBounds="false"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/photoViewB"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:adjustViewBounds="false"

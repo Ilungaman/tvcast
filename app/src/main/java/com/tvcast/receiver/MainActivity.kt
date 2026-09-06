@@ -1,14 +1,21 @@
 package com.tvcast.receiver
 
+import android.animation.Animator
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.SurfaceHolder
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.lifecycleScope
@@ -37,6 +44,13 @@ class MainActivity : AppCompatActivity() {
     private var slideshowJob: Job? = null
     private var toastJob: Job? = null
     private var photoJob: Job? = null
+
+    // Two-layer photo crossfade: frontIsA tracks which ImageView currently
+    // shows the active photo, so a new one can animate in on the other
+    // layer instead of replacing the bitmap in place (which would just be
+    // a fade-in from black, not an actual transition between photos).
+    private var frontIsA = true
+    private var photoAnimator: Animator? = null
 
     // Written from the UI thread (surface lifecycle / mirror state), read
     // from UxPlay's native callback threads (video and audio each get
@@ -242,6 +256,7 @@ class MainActivity : AppCompatActivity() {
                 p?.volume = if (cmd.on) 0f else 1f
             }
             is Command.RepeatOne -> CastState.repeatOne.value = cmd.on
+            is Command.Transition -> CastState.transitionEffect.value = TransitionEffect.fromWire(cmd.effect)
             is Command.Notice -> toast(cmd.text)
         }
     }
@@ -282,8 +297,7 @@ class MainActivity : AppCompatActivity() {
 
         if (entry.isVideo) {
             photoJob?.cancel()
-            b.photoView.visibility = View.GONE
-            b.photoView.setImageDrawable(null)
+            resetPhotoViews()
             b.playerView.visibility = View.VISIBLE
             slideshowJob?.cancel()
             player?.apply {
@@ -299,7 +313,6 @@ class MainActivity : AppCompatActivity() {
             CastState.durationMs.value = 0
             CastState.positionMs.value = 0
             b.playerView.visibility = View.GONE
-            b.photoView.visibility = View.VISIBLE
             photoJob?.cancel()
             photoJob = lifecycleScope.launch {
                 val bmp = withContext(Dispatchers.IO) { decodePhoto(file) }
@@ -307,13 +320,100 @@ class MainActivity : AppCompatActivity() {
                 if (bmp == null) {
                     toast("Не удалось открыть изображение")
                 } else {
-                    b.photoView.setImageBitmap(bmp)
-                    b.photoView.alpha = 0f
-                    b.photoView.animate().alpha(1f).setDuration(180).start()
+                    showPhotoWithTransition(bmp)
                 }
             }
             restartSlideshow()
         }
+    }
+
+    /**
+     * Crosses from whichever ImageView is currently the "front" layer to
+     * the other one, which gets the new bitmap -- an actual transition
+     * between the old and new photo, not just a fade-in from black (which
+     * is all a single ImageView could ever show, since setImageBitmap()
+     * replaces its content immediately).
+     */
+    private fun showPhotoWithTransition(bmp: Bitmap) {
+        val front = if (frontIsA) b.photoView else b.photoViewB
+        val back = if (frontIsA) b.photoViewB else b.photoView
+        val oldBitmap = (front.drawable as? BitmapDrawable)?.bitmap
+
+        photoAnimator?.cancel()
+        photoAnimator = null
+        front.animate().cancel()
+        back.animate().cancel()
+        back.alpha = 1f
+        back.translationX = 0f
+        back.scaleX = 1f
+        back.scaleY = 1f
+        back.setImageBitmap(bmp)
+        back.visibility = View.VISIBLE
+
+        val configured = CastState.transitionEffect.value
+        val effect = if (configured == TransitionEffect.RANDOM) {
+            listOf(TransitionEffect.FADE, TransitionEffect.KENBURNS, TransitionEffect.SLIDE).random()
+        } else configured
+
+        when (effect) {
+            TransitionEffect.SLIDE -> {
+                val w = b.root.width.takeIf { it > 0 }?.toFloat() ?: resources.displayMetrics.widthPixels.toFloat()
+                back.translationX = w
+                val interp = AccelerateDecelerateInterpolator()
+                front.animate().translationX(-w).setDuration(500).setInterpolator(interp).start()
+                back.animate().translationX(0f).setDuration(500).setInterpolator(interp)
+                    .withEndAction { finishPhotoTransition(front, oldBitmap) }.start()
+            }
+            TransitionEffect.KENBURNS -> {
+                back.alpha = 0f
+                back.animate().alpha(1f).setDuration(600)
+                    .withEndAction { finishPhotoTransition(front, oldBitmap) }.start()
+                val durationMs = CastState.slideshowInterval.value.coerceIn(2, 120) * 1000L + 2000L
+                val sx = ObjectAnimator.ofFloat(back, View.SCALE_X, 1f, 1.15f)
+                val sy = ObjectAnimator.ofFloat(back, View.SCALE_Y, 1f, 1.15f)
+                val set = AnimatorSet()
+                set.playTogether(sx, sy)
+                set.duration = durationMs
+                set.interpolator = LinearInterpolator()
+                set.start()
+                photoAnimator = set
+            }
+            else -> { // FADE
+                back.alpha = 0f
+                back.animate().alpha(1f).setDuration(500)
+                    .withEndAction { finishPhotoTransition(front, oldBitmap) }.start()
+                front.animate().alpha(0f).setDuration(500).start()
+            }
+        }
+        frontIsA = !frontIsA
+    }
+
+    private fun finishPhotoTransition(outgoing: ImageView, oldBitmap: Bitmap?) {
+        outgoing.visibility = View.GONE
+        outgoing.setImageDrawable(null)
+        outgoing.alpha = 1f
+        outgoing.translationX = 0f
+        outgoing.scaleX = 1f
+        outgoing.scaleY = 1f
+        if (oldBitmap != null && !oldBitmap.isRecycled) oldBitmap.recycle()
+    }
+
+    /** Cancels any running transition and clears both photo layers, recycling their bitmaps. */
+    private fun resetPhotoViews() {
+        photoAnimator?.cancel()
+        photoAnimator = null
+        for (v in listOf(b.photoView, b.photoViewB)) {
+            v.animate().cancel()
+            val bmp = (v.drawable as? BitmapDrawable)?.bitmap
+            v.setImageDrawable(null)
+            v.visibility = View.GONE
+            v.alpha = 1f
+            v.translationX = 0f
+            v.scaleX = 1f
+            v.scaleY = 1f
+            if (bmp != null && !bmp.isRecycled) bmp.recycle()
+        }
+        frontIsA = true
     }
 
     private fun showIdle() {
@@ -326,8 +426,7 @@ class MainActivity : AppCompatActivity() {
         CastState.positionMs.value = 0
         CastState.durationMs.value = 0
         b.playerView.visibility = View.GONE
-        b.photoView.visibility = View.GONE
-        b.photoView.setImageDrawable(null)
+        resetPhotoViews()
         b.airplaySurface.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
         b.idleView.visibility = View.VISIBLE

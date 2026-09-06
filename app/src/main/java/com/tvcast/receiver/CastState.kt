@@ -29,7 +29,17 @@ sealed class Command {
     data class Slideshow(val on: Boolean, val intervalSec: Int) : Command()
     data class Mute(val on: Boolean) : Command()
     data class RepeatOne(val on: Boolean) : Command()
+    data class Transition(val effect: String) : Command()
     data class Notice(val text: String) : Command()
+}
+
+/** Эффект смены фото. RANDOM выбирает один из остальных заново на каждом показе. */
+enum class TransitionEffect {
+    FADE, KENBURNS, SLIDE, RANDOM;
+
+    companion object {
+        fun fromWire(s: String): TransitionEffect = entries.firstOrNull { it.name.equals(s, ignoreCase = true) } ?: FADE
+    }
 }
 
 /**
@@ -44,6 +54,7 @@ object CastState {
     val durationMs = MutableStateFlow(0L)
     val slideshowOn = MutableStateFlow(false)
     val slideshowInterval = MutableStateFlow(6)
+    val transitionEffect = MutableStateFlow(TransitionEffect.FADE)
     val muted = MutableStateFlow(false)
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")

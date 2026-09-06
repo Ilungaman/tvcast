@@ -100,6 +100,7 @@
     setChip($('repeatChip'), s.repeatOne, 'Повтор вкл.', 'Повтор выкл.');
     setChip($('slideChip'), s.slideshow, 'Слайдшоу вкл.', 'Слайдшоу выкл.');
     if (String(s.interval) !== $('interval').value) $('interval').value = String(s.interval);
+    if (s.transition && s.transition !== $('transition').value) $('transition').value = s.transition;
 
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
@@ -303,6 +304,10 @@
       on: !!(state && state.slideshow),
       interval: parseInt($('interval').value, 10) || 6
     });
+  });
+
+  $('transition').addEventListener('change', function () {
+    cmd({ action: 'transition', effect: $('transition').value });
   });
 
   $('clearBtn').addEventListener('click', function () {

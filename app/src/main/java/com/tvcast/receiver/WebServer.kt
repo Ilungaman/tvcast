@@ -186,6 +186,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             )
             "mute" -> CastState.commands.emit(Command.Mute(body.optBoolean("on")))
             "repeat" -> CastState.commands.emit(Command.RepeatOne(body.optBoolean("on")))
+            "transition" -> CastState.commands.emit(Command.Transition(body.optString("effect", "fade")))
             "delete" -> {
                 val id = body.optString("id")
                 if (CastState.currentId.value == id) CastState.commands.emit(Command.Stop)
@@ -220,6 +221,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("duration", CastState.durationMs.value)
             .put("slideshow", CastState.slideshowOn.value)
             .put("interval", CastState.slideshowInterval.value)
+            .put("transition", CastState.transitionEffect.value.name.lowercase())
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })
