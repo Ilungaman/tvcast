@@ -213,15 +213,35 @@
       var fd = new FormData();
       fd.append('file', file, file.name);
 
+      // A flat XHR timeout would abort a large, slow-but-still-progressing
+      // video upload just as readily as a genuinely stuck one. Instead,
+      // reset this on every progress tick and only treat it as stuck if
+      // NO progress happens for a long stretch -- that's what actually
+      // distinguishes "slow" from "hung", and it's the only thing standing
+      // between one bad request and the whole queue looking permanently
+      // stuck (uploading stays true, so picking more files silently does
+      // nothing -- exactly what a stuck request without this looked like).
+      var STALL_MS = 45000;
+      var stallTimer = null;
+      function armStallTimer() {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(function () {
+          try { xhr.abort(); } catch (e) {}
+        }, STALL_MS);
+      }
+
       var xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/upload?show=0');
+      armStallTimer();
       xhr.upload.onprogress = function (e) {
+        armStallTimer();
         if (!e.lengthComputable) { pct.textContent = 'отправка…'; return; }
         var p = e.loaded / e.total;
         fill.style.width = (p * 100).toFixed(1) + '%';
         pct.textContent = Math.round(p * 100) + '% · ' + fmtSize(e.loaded) + ' из ' + fmtSize(e.total);
       };
       xhr.onload = function () {
+        clearTimeout(stallTimer);
         if (xhr.status >= 200 && xhr.status < 300) {
           fill.style.width = '100%';
           pct.textContent = 'готово';
@@ -237,7 +257,13 @@
         next();
       };
       xhr.onerror = function () {
+        clearTimeout(stallTimer);
         pct.textContent = 'ошибка сети';
+        idx++;
+        next();
+      };
+      xhr.onabort = function () {
+        pct.textContent = 'нет ответа, пропущено';
         idx++;
         next();
       };
