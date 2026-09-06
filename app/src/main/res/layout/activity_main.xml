@@ -213,13 +213,16 @@
             android:textSize="15sp" />
     </LinearLayout>
 
-    <!-- Часы и погода: видны на экране ожидания и в скринсейвере -->
+    <!-- Часы и погода: видны на экране ожидания и в скринсейвере. Позиция
+         не фиксирована -- MainActivity.startClockMotion() непрерывно
+         двигает её по экрану через translationX/Y (см. отступ от краёв
+         в CLOCK_EDGE_INSET_DP), поэтому layout_gravity здесь -- лишь
+         точка отсчёта (0,0) для этих трансляций, а не реальное место. -->
     <LinearLayout
         android:id="@+id/ambientInfo"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="28dp"
+        android:layout_gravity="top|start"
         android:gravity="end"
         android:orientation="vertical">
 

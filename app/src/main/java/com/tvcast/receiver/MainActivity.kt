@@ -76,15 +76,15 @@ class MainActivity : AppCompatActivity() {
     private var clockAnchorEpochMs: Long = System.currentTimeMillis()
     private var clockAnchorElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
 
-    // Cycled through periodically so the clock/weather overlay never sits
-    // in one spot long enough to burn into the panel.
-    private val clockPositions = listOf(
-        Gravity.TOP or Gravity.END,
-        Gravity.TOP or Gravity.START,
-        Gravity.BOTTOM or Gravity.END,
-        Gravity.BOTTOM or Gravity.START
-    )
-    private var clockPosIdx = 0
+    // Continuous slow drift across the whole screen, bouncing off the
+    // edges (DVD-logo style) -- chosen over periodically jumping between a
+    // few fixed spots so the overlay is never sitting still long enough to
+    // burn into the panel, and never visibly teleports either.
+    private var clockPosXPx = 0f
+    private var clockPosYPx = 0f
+    private var clockVelXPx = 0f
+    private var clockVelYPx = 0f
+    private var clockMotionInited = false
 
     // Background "atmospheric" music: a second, independent ExoPlayer so it
     // never fights the main one over MediaItem/prepare() state, looping a
@@ -109,7 +109,9 @@ class MainActivity : AppCompatActivity() {
         private const val SCREENSAVER_INTERVAL_MS = 8_000L
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
-        private const val CLOCK_MOVE_INTERVAL_MS = 5 * 60_000L
+        private const val CLOCK_TICK_MS = 33L
+        private const val CLOCK_SPEED_DP_PER_SEC = 14f
+        private const val CLOCK_EDGE_INSET_DP = 24f
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -665,23 +667,43 @@ class MainActivity : AppCompatActivity() {
         }
         clockMoveJob?.cancel()
         clockMoveJob = lifecycleScope.launch {
+            val speedPx = CLOCK_SPEED_DP_PER_SEC * resources.displayMetrics.density
+            val insetPx = CLOCK_EDGE_INSET_DP * resources.displayMetrics.density
+            var lastTickNs = System.nanoTime()
             while (true) {
-                delay(CLOCK_MOVE_INTERVAL_MS)
-                moveAmbientInfo()
+                delay(CLOCK_TICK_MS)
+                val nowNs = System.nanoTime()
+                val dtSec = (nowNs - lastTickNs) / 1_000_000_000f
+                lastTickNs = nowNs
+
+                val rootW = b.root.width
+                val rootH = b.root.height
+                val viewW = b.ambientInfo.width
+                val viewH = b.ambientInfo.height
+                // Not laid out yet (e.g. right at startup) -- try again next tick.
+                if (rootW == 0 || rootH == 0 || viewW == 0 || viewH == 0) continue
+
+                val maxX = (rootW - viewW - insetPx).coerceAtLeast(0f)
+                val maxY = (rootH - viewH - insetPx).coerceAtLeast(0f)
+                if (!clockMotionInited) {
+                    clockMotionInited = true
+                    clockPosXPx = maxX // starts top-right, matching the old fixed position
+                    clockPosYPx = insetPx
+                    clockVelXPx = -speedPx
+                    clockVelYPx = speedPx * 0.6f
+                }
+
+                clockPosXPx += clockVelXPx * dtSec
+                clockPosYPx += clockVelYPx * dtSec
+                if (clockPosXPx < insetPx) { clockPosXPx = insetPx; clockVelXPx = -clockVelXPx }
+                if (clockPosXPx > maxX) { clockPosXPx = maxX; clockVelXPx = -clockVelXPx }
+                if (clockPosYPx < insetPx) { clockPosYPx = insetPx; clockVelYPx = -clockVelYPx }
+                if (clockPosYPx > maxY) { clockPosYPx = maxY; clockVelYPx = -clockVelYPx }
+
+                b.ambientInfo.translationX = clockPosXPx
+                b.ambientInfo.translationY = clockPosYPx
             }
         }
-    }
-
-    private fun moveAmbientInfo() {
-        clockPosIdx = (clockPosIdx + 1) % clockPositions.size
-        val gravity = clockPositions[clockPosIdx]
-        b.ambientInfo.animate().alpha(0f).setDuration(400).withEndAction {
-            val lp = b.ambientInfo.layoutParams as FrameLayout.LayoutParams
-            lp.gravity = gravity
-            b.ambientInfo.layoutParams = lp
-            b.ambientInfo.gravity = if (gravity and Gravity.START == Gravity.START) Gravity.START else Gravity.END
-            b.ambientInfo.animate().alpha(1f).setDuration(400).start()
-        }.start()
     }
 
     private fun formatClock(epochMs: Long, style: String): String {
