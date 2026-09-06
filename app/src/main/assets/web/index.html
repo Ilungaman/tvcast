@@ -159,7 +159,19 @@
         <input id="clockColor" type="color" value="#ffffff">
       </label>
     </div>
-    <p class="hint">Часы и погода на экране ожидания периодически меняют место на экране, чтобы не выжигать пиксели телевизора. Время и погода определяются по IP-адресу телевизора, а не по системным часам устройства.</p>
+    <div class="row">
+      <label class="interval">
+        Движение
+        <select id="clockMotion">
+          <option value="bounce" selected>Отскок (как DVD)</option>
+          <option value="orbit">По кругу</option>
+          <option value="wander">Случайные точки</option>
+          <option value="drift">Лёгкое дрожание</option>
+          <option value="lissajous">Восьмёрка</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint">Часы и погода на экране ожидания постоянно двигаются, чтобы не выжигать пиксели телевизора. Время и погода определяются по IP-адресу телевизора, а не по системным часам устройства.</p>
   </section>
 
   <section class="card">

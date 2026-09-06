@@ -68,6 +68,8 @@ object CastState {
     val clockStyle = MutableStateFlow("digital24")
     val clockFontSize = MutableStateFlow(28)
     val clockColor = MutableStateFlow("#FFFFFF")
+    /** "bounce" | "orbit" | "wander" | "drift" | "lissajous" -- see MainActivity's clock motion functions. */
+    val clockMotionStyle = MutableStateFlow("bounce")
     val muted = MutableStateFlow(false)
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")

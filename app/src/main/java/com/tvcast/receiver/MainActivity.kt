@@ -39,7 +39,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 class MainActivity : AppCompatActivity() {
@@ -76,15 +79,27 @@ class MainActivity : AppCompatActivity() {
     private var clockAnchorEpochMs: Long = System.currentTimeMillis()
     private var clockAnchorElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
 
-    // Continuous slow drift across the whole screen, bouncing off the
-    // edges (DVD-logo style) -- chosen over periodically jumping between a
-    // few fixed spots so the overlay is never sitting still long enough to
-    // burn into the panel, and never visibly teleports either.
-    private var clockPosXPx = 0f
-    private var clockPosYPx = 0f
-    private var clockVelXPx = 0f
-    private var clockVelYPx = 0f
-    private var clockMotionInited = false
+    // Continuous slow movement across the screen so the clock/weather
+    // overlay never sits still long enough to burn into the panel --
+    // several selectable styles (CastState.clockMotionStyle), each a pure
+    // function of elapsed time except "bounce" and "wander", which need
+    // their own persistent velocity/target state.
+    private var clockMotionStarted = false
+    private var clockMotionStartNs = 0L
+
+    private var bounceInited = false
+    private var bouncePosX = 0f
+    private var bouncePosY = 0f
+    private var bounceVelX = 0f
+    private var bounceVelY = 0f
+
+    private var wanderInited = false
+    private var wanderPosX = 0f
+    private var wanderPosY = 0f
+    private var wanderTargetX = 0f
+    private var wanderTargetY = 0f
+    private var wanderPaused = false
+    private var wanderPauseUntilNs = 0L
 
     // Background "atmospheric" music: a second, independent ExoPlayer so it
     // never fights the main one over MediaItem/prepare() state, looping a
@@ -112,6 +127,12 @@ class MainActivity : AppCompatActivity() {
         private const val CLOCK_TICK_MS = 33L
         private const val CLOCK_SPEED_DP_PER_SEC = 14f
         private const val CLOCK_EDGE_INSET_DP = 24f
+        private const val CLOCK_ORBIT_PERIOD_SEC = 180f
+        private const val CLOCK_LISSAJOUS_PERIOD_SEC = 240f
+        private const val CLOCK_DRIFT_PERIOD_SEC = 45f
+        private const val CLOCK_DRIFT_AMPLITUDE_DP = 28f
+        private const val WANDER_PAUSE_MIN_SEC = 60f
+        private const val WANDER_PAUSE_MAX_SEC = 180f
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -667,8 +688,10 @@ class MainActivity : AppCompatActivity() {
         }
         clockMoveJob?.cancel()
         clockMoveJob = lifecycleScope.launch {
-            val speedPx = CLOCK_SPEED_DP_PER_SEC * resources.displayMetrics.density
-            val insetPx = CLOCK_EDGE_INSET_DP * resources.displayMetrics.density
+            val density = resources.displayMetrics.density
+            val speedPx = CLOCK_SPEED_DP_PER_SEC * density
+            val insetPx = CLOCK_EDGE_INSET_DP * density
+            val driftAmpPx = CLOCK_DRIFT_AMPLITUDE_DP * density
             var lastTickNs = System.nanoTime()
             while (true) {
                 delay(CLOCK_TICK_MS)
@@ -683,27 +706,132 @@ class MainActivity : AppCompatActivity() {
                 // Not laid out yet (e.g. right at startup) -- try again next tick.
                 if (rootW == 0 || rootH == 0 || viewW == 0 || viewH == 0) continue
 
-                val maxX = (rootW - viewW - insetPx).coerceAtLeast(0f)
-                val maxY = (rootH - viewH - insetPx).coerceAtLeast(0f)
-                if (!clockMotionInited) {
-                    clockMotionInited = true
-                    clockPosXPx = maxX // starts top-right, matching the old fixed position
-                    clockPosYPx = insetPx
-                    clockVelXPx = -speedPx
-                    clockVelYPx = speedPx * 0.6f
+                val minX = insetPx
+                val minY = insetPx
+                val maxX = (rootW - viewW - insetPx).coerceAtLeast(minX)
+                val maxY = (rootH - viewH - insetPx).coerceAtLeast(minY)
+
+                if (!clockMotionStarted) {
+                    clockMotionStarted = true
+                    clockMotionStartNs = nowNs
                 }
+                val tSec = (nowNs - clockMotionStartNs) / 1_000_000_000f
 
-                clockPosXPx += clockVelXPx * dtSec
-                clockPosYPx += clockVelYPx * dtSec
-                if (clockPosXPx < insetPx) { clockPosXPx = insetPx; clockVelXPx = -clockVelXPx }
-                if (clockPosXPx > maxX) { clockPosXPx = maxX; clockVelXPx = -clockVelXPx }
-                if (clockPosYPx < insetPx) { clockPosYPx = insetPx; clockVelYPx = -clockVelYPx }
-                if (clockPosYPx > maxY) { clockPosYPx = maxY; clockVelYPx = -clockVelYPx }
-
-                b.ambientInfo.translationX = clockPosXPx
-                b.ambientInfo.translationY = clockPosYPx
+                val (x, y) = when (CastState.clockMotionStyle.value) {
+                    "orbit" -> orbitPosition(tSec, minX, maxX, minY, maxY)
+                    "lissajous" -> lissajousPosition(tSec, minX, maxX, minY, maxY)
+                    "drift" -> driftPosition(tSec, minX, maxX, minY, maxY, driftAmpPx)
+                    "wander" -> wanderPosition(dtSec, nowNs, speedPx, minX, maxX, minY, maxY)
+                    else -> bouncePosition(dtSec, speedPx, minX, maxX, minY, maxY)
+                }
+                b.ambientInfo.translationX = x
+                b.ambientInfo.translationY = y
             }
         }
+    }
+
+    private fun bouncePosition(
+        dtSec: Float,
+        speedPx: Float,
+        minX: Float,
+        maxX: Float,
+        minY: Float,
+        maxY: Float
+    ): Pair<Float, Float> {
+        if (!bounceInited) {
+            bounceInited = true
+            bouncePosX = maxX // starts top-right, matching the original fixed position
+            bouncePosY = minY
+            bounceVelX = -speedPx
+            bounceVelY = speedPx * 0.6f
+        }
+        bouncePosX += bounceVelX * dtSec
+        bouncePosY += bounceVelY * dtSec
+        if (bouncePosX < minX) { bouncePosX = minX; bounceVelX = -bounceVelX }
+        if (bouncePosX > maxX) { bouncePosX = maxX; bounceVelX = -bounceVelX }
+        if (bouncePosY < minY) { bouncePosY = minY; bounceVelY = -bounceVelY }
+        if (bouncePosY > maxY) { bouncePosY = maxY; bounceVelY = -bounceVelY }
+        return bouncePosX to bouncePosY
+    }
+
+    private fun orbitPosition(tSec: Float, minX: Float, maxX: Float, minY: Float, maxY: Float): Pair<Float, Float> {
+        val centerX = (minX + maxX) / 2f
+        val centerY = (minY + maxY) / 2f
+        val radiusX = (maxX - minX) / 2f
+        val radiusY = (maxY - minY) / 2f
+        val theta = (tSec / CLOCK_ORBIT_PERIOD_SEC) * (2f * Math.PI).toFloat()
+        return (centerX + radiusX * cos(theta)) to (centerY + radiusY * sin(theta))
+    }
+
+    /** Sin(theta)/sin(2*theta) traces a classic figure-8 (infinity symbol). */
+    private fun lissajousPosition(tSec: Float, minX: Float, maxX: Float, minY: Float, maxY: Float): Pair<Float, Float> {
+        val centerX = (minX + maxX) / 2f
+        val centerY = (minY + maxY) / 2f
+        val radiusX = (maxX - minX) / 2f
+        val radiusY = (maxY - minY) / 2f
+        val theta = (tSec / CLOCK_LISSAJOUS_PERIOD_SEC) * (2f * Math.PI).toFloat()
+        return (centerX + radiusX * sin(theta)) to (centerY + radiusY * sin(2f * theta))
+    }
+
+    /** Small, slow wobble around the original top-right resting spot -- barely noticeable. */
+    private fun driftPosition(
+        tSec: Float,
+        minX: Float,
+        maxX: Float,
+        minY: Float,
+        maxY: Float,
+        ampPx: Float
+    ): Pair<Float, Float> {
+        val anchorX = maxX
+        val anchorY = minY
+        val theta = (tSec / CLOCK_DRIFT_PERIOD_SEC) * (2f * Math.PI).toFloat()
+        val x = (anchorX + ampPx * cos(theta)).coerceIn(minX, maxX)
+        val y = (anchorY + ampPx * sin(theta) * 0.6f).coerceIn(minY, maxY)
+        return x to y
+    }
+
+    private fun wanderPosition(
+        dtSec: Float,
+        nowNs: Long,
+        speedPx: Float,
+        minX: Float,
+        maxX: Float,
+        minY: Float,
+        maxY: Float
+    ): Pair<Float, Float> {
+        if (!wanderInited) {
+            wanderInited = true
+            wanderPosX = maxX
+            wanderPosY = minY
+            pickNewWanderTarget(minX, maxX, minY, maxY)
+        }
+        if (wanderPaused) {
+            if (nowNs >= wanderPauseUntilNs) {
+                wanderPaused = false
+                pickNewWanderTarget(minX, maxX, minY, maxY)
+            }
+            return wanderPosX to wanderPosY
+        }
+        val dx = wanderTargetX - wanderPosX
+        val dy = wanderTargetY - wanderPosY
+        val dist = sqrt(dx * dx + dy * dy)
+        val step = speedPx * dtSec
+        if (dist <= step || dist < 1f) {
+            wanderPosX = wanderTargetX
+            wanderPosY = wanderTargetY
+            wanderPaused = true
+            val pauseSec = WANDER_PAUSE_MIN_SEC + Math.random().toFloat() * (WANDER_PAUSE_MAX_SEC - WANDER_PAUSE_MIN_SEC)
+            wanderPauseUntilNs = nowNs + (pauseSec * 1_000_000_000L).toLong()
+        } else {
+            wanderPosX += dx / dist * step
+            wanderPosY += dy / dist * step
+        }
+        return wanderPosX to wanderPosY
+    }
+
+    private fun pickNewWanderTarget(minX: Float, maxX: Float, minY: Float, maxY: Float) {
+        wanderTargetX = minX + Math.random().toFloat() * (maxX - minX)
+        wanderTargetY = minY + Math.random().toFloat() * (maxY - minY)
     }
 
     private fun formatClock(epochMs: Long, style: String): String {

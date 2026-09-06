@@ -134,6 +134,7 @@
     if (s.clockStyle && s.clockStyle !== $('clockStyle').value) $('clockStyle').value = s.clockStyle;
     if (s.clockFontSize && Number($('clockFontSize').value) !== s.clockFontSize) $('clockFontSize').value = String(s.clockFontSize);
     if (s.clockColor && s.clockColor !== $('clockColor').value) $('clockColor').value = s.clockColor;
+    if (s.clockMotion && s.clockMotion !== $('clockMotion').value) $('clockMotion').value = s.clockMotion;
 
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
@@ -405,12 +406,14 @@
       action: 'clock',
       style: $('clockStyle').value,
       fontSize: parseInt($('clockFontSize').value, 10) || 28,
-      color: $('clockColor').value
+      color: $('clockColor').value,
+      motion: $('clockMotion').value
     });
   }
   $('clockStyle').addEventListener('change', sendClockSettings);
   $('clockFontSize').addEventListener('change', sendClockSettings);
   $('clockColor').addEventListener('change', sendClockSettings);
+  $('clockMotion').addEventListener('change', sendClockSettings);
 
   $('interval').addEventListener('change', function () {
     cmd({

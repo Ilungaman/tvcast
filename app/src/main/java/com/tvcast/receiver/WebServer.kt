@@ -279,6 +279,8 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 if (fontSize > 0) CastState.clockFontSize.value = fontSize.coerceIn(14, 64)
                 val color = body.optString("color")
                 if (color.isNotBlank()) CastState.clockColor.value = color
+                val motion = body.optString("motion")
+                if (motion.isNotBlank()) CastState.clockMotionStyle.value = motion
             }
             "delete" -> {
                 val id = body.optString("id")
@@ -333,6 +335,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("clockStyle", CastState.clockStyle.value)
             .put("clockFontSize", CastState.clockFontSize.value)
             .put("clockColor", CastState.clockColor.value)
+            .put("clockMotion", CastState.clockMotionStyle.value)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })
