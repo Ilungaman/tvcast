@@ -214,9 +214,9 @@
     </LinearLayout>
 
     <!-- Часы и погода: видны на экране ожидания и в скринсейвере. Позиция
-         не фиксирована -- MainActivity.startClockMotion() непрерывно
+         не фиксирована: MainActivity.startAmbientUpdaters() непрерывно
          двигает её по экрану через translationX/Y (см. отступ от краёв
-         в CLOCK_EDGE_INSET_DP), поэтому layout_gravity здесь -- лишь
+         в CLOCK_EDGE_INSET_DP), поэтому layout_gravity здесь — лишь
          точка отсчёта (0,0) для этих трансляций, а не реальное место. -->
     <LinearLayout
         android:id="@+id/ambientInfo"
