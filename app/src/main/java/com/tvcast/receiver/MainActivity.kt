@@ -476,8 +476,11 @@ class MainActivity : AppCompatActivity() {
         resetPhotoViews()
         b.airplaySurface.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
+        b.idleView.animate().cancel()
         b.idleView.alpha = 1f
         b.idleView.visibility = View.VISIBLE
+        b.ambientInfo.animate().cancel()
+        b.ambientInfo.alpha = 1f
         b.ambientInfo.visibility = View.VISIBLE
         renderIdleInfo()
         armIdleTimeout()
@@ -503,11 +506,17 @@ class MainActivity : AppCompatActivity() {
         screensaverActive = true
         val photos = CastState.items.value.filter { !it.isVideo }
         if (photos.isEmpty()) {
-            // Пустая библиотека -- гасим экран, чтобы не выжигать статичный QR/PIN.
+            // Пустая библиотека -- гасим экран целиком. ambientInfo (часы/
+            // погода) -- отдельная view поверх idleView, а не его часть, так
+            // что её тоже нужно гасить явно: иначе именно часы, статичные и
+            // самые маленькие/яркие на экране, окажутся ровно тем, что
+            // выжигает OLED-панель, а не текстом, который мы гасим.
             b.idleView.animate().alpha(0f).setDuration(1500).start()
+            b.ambientInfo.animate().alpha(0f).setDuration(1500).start()
             return
         }
         b.idleView.visibility = View.GONE
+        b.ambientInfo.visibility = View.GONE
         startBackgroundMusic()
         screensaverJob = lifecycleScope.launch {
             var idx = 0
