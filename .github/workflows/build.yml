@@ -45,7 +45,7 @@ jobs:
           if-no-files-found: error
 
       - name: Опубликовать релиз с прямой ссылкой
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/claude/photo-video-tv-app-hp0tvk'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
