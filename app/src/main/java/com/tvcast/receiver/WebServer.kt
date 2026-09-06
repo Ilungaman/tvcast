@@ -359,8 +359,16 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
         val bytes = withContext(Dispatchers.IO) {
             runCatching { context.assets.open(path).use { it.readBytes() } }.getOrNull()
         }
-        if (bytes == null) respond(HttpStatusCode.NotFound)
-        else respondBytes(bytes, type.withCharset(Charsets.UTF_8))
+        if (bytes == null) {
+            respond(HttpStatusCode.NotFound)
+        } else {
+            // Safari on iOS caches these fairly aggressively across visits --
+            // across app rebuilds during active development that can mean an
+            // old app.js silently keeps running against a new server, which
+            // looks like an unexplained bug rather than a stale asset.
+            response.headers.append("Cache-Control", "no-store")
+            respondBytes(bytes, type.withCharset(Charsets.UTF_8))
+        }
     }
 
     companion object {

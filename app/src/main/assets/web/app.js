@@ -22,7 +22,10 @@
     } catch (e) { startPolling(); return; }
 
     ws.onopen = function () { wsReady = true; stopPolling(); setDot(true); };
-    ws.onmessage = function (ev) { try { render(JSON.parse(ev.data)); } catch (e) {} };
+    ws.onmessage = function (ev) {
+      try { render(JSON.parse(ev.data)); }
+      catch (e) { reportRenderError(e); }
+    };
     ws.onclose = function () { wsReady = false; setDot(false); startPolling(); setTimeout(connect, 2500); };
     ws.onerror = function () { try { ws.close(); } catch (e) {} };
   }
@@ -31,12 +34,28 @@
     if (pollTimer) return;
     pollTimer = setInterval(function () {
       fetch('/api/state').then(function (r) { return r.json(); })
-        .then(function (s) { setDot(true); render(s); })
+        .then(function (s) {
+          setDot(true);
+          try { render(s); } catch (e) { reportRenderError(e); }
+        })
         .catch(function () { setDot(false); });
     }, 1500);
   }
 
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  // A bug in render() used to fail completely silently (both call sites
+  // above only guarded against network/parse errors) -- from the outside
+  // that looks exactly like "I entered the PIN and nothing happened", with
+  // no way to tell a real problem from a slow network. Surfacing it as a
+  // toast at least makes a broken render visible instead of a frozen page.
+  var lastRenderErrorAt = 0;
+  function reportRenderError(e) {
+    var now = Date.now();
+    if (now - lastRenderErrorAt < 4000) return;
+    lastRenderErrorAt = now;
+    toast('Ошибка обновления экрана: ' + (e && e.message ? e.message : e));
+  }
 
   function cmd(obj) {
     if (wsReady && ws && ws.readyState === 1) {
