@@ -474,22 +474,40 @@
 
   // -------------------------------------------------------------------- вход
 
+  // "Nothing happens" after tapping submit is indistinguishable from a slow
+  // network unless every outcome is shown -- so every branch below now sets
+  // pinError's actual text (the previous version only ever toggled a fixed
+  // "wrong PIN" message, silent on a real network/server failure) and the
+  // button is disabled/relabeled while the request is in flight so a second
+  // tap can't be mistaken for "the first one did nothing".
   function submitPin() {
     var pin = $('pinInput').value.trim();
+    var btn = $('pinSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Проверка…';
+    $('pinError').hidden = true;
     fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: pin })
     }).then(function (r) {
+      btn.disabled = false;
+      btn.textContent = 'Войти';
       if (r.ok) {
         $('pinGate').hidden = true;
         $('pinError').hidden = true;
         connect();
         startPolling();
       } else {
+        $('pinError').textContent = 'Неверный PIN (ответ сервера: ' + r.status + ').';
         $('pinError').hidden = false;
       }
-    }).catch(function () { $('pinError').hidden = false; });
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.textContent = 'Войти';
+      $('pinError').textContent = 'Ошибка сети: ' + (e && e.message ? e.message : e);
+      $('pinError').hidden = false;
+    });
   }
 
   $('pinSubmit').addEventListener('click', submitPin);

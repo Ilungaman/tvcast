@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     // first successful fetch.
     private var clockAnchorEpochMs: Long = System.currentTimeMillis()
     private var clockAnchorElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
+    private var lastWeatherInfo: WeatherInfo? = null
 
     // Continuous slow movement across the screen so the clock/weather
     // overlay never sits still long enough to burn into the panel --
@@ -245,6 +246,7 @@ class MainActivity : AppCompatActivity() {
         player?.pause()
         b.idleView.visibility = View.GONE
         b.ambientInfo.visibility = View.GONE
+        b.screensaverAmbient.visibility = View.GONE
         b.playerView.visibility = View.GONE
         resetPhotoViews()
         b.titleOverlay.visibility = View.GONE
@@ -551,6 +553,9 @@ class MainActivity : AppCompatActivity() {
         b.ambientInfo.animate().cancel()
         b.ambientInfo.alpha = 1f
         b.ambientInfo.visibility = View.VISIBLE
+        b.screensaverAmbient.animate().cancel()
+        b.screensaverAmbient.alpha = 1f
+        b.screensaverAmbient.visibility = View.GONE
         stopClockMotion()
         renderIdleInfo()
         armIdleTimeout()
@@ -576,23 +581,29 @@ class MainActivity : AppCompatActivity() {
         screensaverActive = true
         val photos = CastState.items.value.filter { !it.isVideo }
         if (photos.isEmpty()) {
-            // Пустая библиотека -- гасим экран целиком. ambientInfo (часы/
-            // погода) -- отдельная view поверх idleView, а не его часть, так
-            // что её тоже нужно гасить явно: иначе именно часы, статичные и
-            // самые маленькие/яркие на экране, окажутся ровно тем, что
-            // выжигает OLED-панель, а не текстом, который мы гасим.
-            stopClockMotion()
+            // Пустая библиотека -- вместо просто чёрного экрана показываем
+            // отдельный, крупно и красиво оформленный блок часов+даты+
+            // погоды (screensaverAmbient), а не мелкие часы с экрана
+            // ожидания (ambientInfo) -- те гасим вместе с idleView.
             b.idleView.animate().alpha(0f).setDuration(1500).start()
             b.ambientInfo.animate().alpha(0f).setDuration(1500).start()
+            renderWeatherViews(lastWeatherInfo)
+            b.screensaverAmbient.alpha = 0f
+            b.screensaverAmbient.translationX = 0f
+            b.screensaverAmbient.translationY = 0f
+            b.screensaverAmbient.visibility = View.VISIBLE
+            b.screensaverAmbient.animate().alpha(1f).setDuration(1500).start()
+            startClockMotion(b.screensaverAmbient)
             return
         }
         b.idleView.visibility = View.GONE
+        b.screensaverAmbient.visibility = View.GONE
         // На обычном экране ожидания часы стоят на месте (не мешают QR/PIN),
         // а бегать по экрану начинают только здесь: в скринсейвере под ними
         // долго крутятся фото, и без движения именно часы стали бы тем,
         // что выжигает панель на длинной дистанции.
         b.ambientInfo.visibility = View.VISIBLE
-        startClockMotion()
+        startClockMotion(b.ambientInfo)
         startBackgroundMusic()
         screensaverJob = lifecycleScope.launch {
             var idx = 0
@@ -676,6 +687,13 @@ class MainActivity : AppCompatActivity() {
                 b.clockText.text = formatClock(nowMs, CastState.clockStyle.value)
                 b.clockText.textSize = CastState.clockFontSize.value.toFloat()
                 b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
+                // The big screensaver clock always uses its own large fixed
+                // size/color -- deliberately not the user's small idle-clock
+                // preference, since this display is meant to be a striking
+                // ambient screen on its own, not a bigger copy of the corner
+                // clock.
+                b.ssClockText.text = formatClock(nowMs, CastState.clockStyle.value)
+                b.ssDateText.text = formatDate(nowMs)
                 delay(1000L)
             }
         }
@@ -683,17 +701,37 @@ class MainActivity : AppCompatActivity() {
         weatherJob = lifecycleScope.launch {
             while (true) {
                 val info = WeatherProvider.fetch()
+                lastWeatherInfo = info
+                renderWeatherViews(info)
                 if (info != null) {
-                    b.weatherText.text = "${info.emoji} ${info.tempC.roundToInt()}°  ${info.city}"
-                    b.weatherText.visibility = View.VISIBLE
                     clockAnchorEpochMs = info.localEpochMs
                     clockAnchorElapsedMs = android.os.SystemClock.elapsedRealtime()
-                } else {
-                    b.weatherText.visibility = View.GONE
                 }
                 delay(WEATHER_REFRESH_MS)
             }
         }
+    }
+
+    private fun renderWeatherViews(info: WeatherInfo?) {
+        if (info == null) {
+            b.weatherText.visibility = View.GONE
+            b.ssWeatherRow.visibility = View.GONE
+            return
+        }
+        val temp = "${info.tempC.roundToInt()}°"
+        b.weatherText.text = "${info.emoji} $temp  ${info.city}"
+        b.weatherText.visibility = View.VISIBLE
+        b.ssWeatherEmoji.text = info.emoji
+        b.ssWeatherTemp.text = temp
+        b.ssWeatherCity.text = info.city
+        b.ssWeatherRow.visibility = View.VISIBLE
+    }
+
+    private fun formatDate(epochMs: Long): String {
+        val fmt = SimpleDateFormat("EEEE, d MMMM", Locale("ru"))
+        fmt.timeZone = TimeZone.getTimeZone("UTC")
+        val text = fmt.format(Date(epochMs))
+        return text.replaceFirstChar { it.titlecase(Locale("ru")) }
     }
 
     /**
@@ -702,9 +740,11 @@ class MainActivity : AppCompatActivity() {
      * on the plain idle screen it stays parked (see [stopClockMotion]) so
      * it never drifts on top of the QR/URL/PIN text there.
      */
-    private fun startClockMotion() {
+    private fun startClockMotion(target: View) {
         clockMoveJob?.cancel()
         clockMotionStarted = false
+        bounceInited = false
+        wanderInited = false
         clockMoveJob = lifecycleScope.launch {
             val density = resources.displayMetrics.density
             val speedPx = CLOCK_SPEED_DP_PER_SEC * density
@@ -719,8 +759,8 @@ class MainActivity : AppCompatActivity() {
 
                 val rootW = b.root.width
                 val rootH = b.root.height
-                val viewW = b.ambientInfo.width
-                val viewH = b.ambientInfo.height
+                val viewW = target.width
+                val viewH = target.height
                 // Not laid out yet (e.g. right at startup) -- try again next tick.
                 if (rootW == 0 || rootH == 0 || viewW == 0 || viewH == 0) continue
 
@@ -742,8 +782,8 @@ class MainActivity : AppCompatActivity() {
                     "wander" -> wanderPosition(dtSec, nowNs, speedPx, minX, maxX, minY, maxY)
                     else -> bouncePosition(dtSec, speedPx, minX, maxX, minY, maxY)
                 }
-                b.ambientInfo.translationX = x
-                b.ambientInfo.translationY = y
+                target.translationX = x
+                target.translationY = y
             }
         }
     }

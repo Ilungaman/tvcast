@@ -151,6 +151,8 @@
                     android:layout_width="130dp"
                     android:layout_height="130dp"
                     android:layout_marginStart="20dp"
+                    android:background="@drawable/qr_card_bg"
+                    android:padding="10dp"
                     android:contentDescription="@null" />
             </LinearLayout>
 
@@ -242,6 +244,75 @@
             android:textColor="#B9C4CF"
             android:textSize="16sp"
             android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Большой оформленный блок часов+погоды для скринсейвера, когда
+         библиотека фото пуста (иначе это был бы просто чёрный экран без
+         часов). Отдельная view от ambientInfo (мелкие часы на экране
+         ожидания): у него другой масштаб и состав, и он должен быть
+         виден только в этом режиме скринсейвера. -->
+    <LinearLayout
+        android:id="@+id/screensaverAmbient"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:background="@drawable/ambient_card_bg"
+        android:paddingStart="40dp"
+        android:paddingEnd="40dp"
+        android:paddingTop="32dp"
+        android:paddingBottom="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/ssClockText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="88sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/ssDateText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#B9C4CF"
+            android:textSize="18sp" />
+
+        <LinearLayout
+            android:id="@+id/ssWeatherRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/ssWeatherEmoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="34sp" />
+
+            <TextView
+                android:id="@+id/ssWeatherTemp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:textColor="#FFFFFF"
+                android:textSize="30sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/ssWeatherCity"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:textColor="#8B98A6"
+                android:textSize="16sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Плашка с именем файла -->
