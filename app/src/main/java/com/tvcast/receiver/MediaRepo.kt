@@ -34,6 +34,7 @@ object MediaRepo {
     }
 
     fun refresh() {
+        applyAutoCleanup()
         val list = (mediaDir.listFiles() ?: emptyArray())
             .filter { it.isFile && it.name.contains('~') }
             .map { f ->
@@ -47,6 +48,43 @@ object MediaRepo {
             }
             .sortedBy { it.addedAt }
         CastState.items.value = list
+    }
+
+    /**
+     * Off by default -- family photos, not a cache, so silent deletion
+     * only happens when explicitly turned on via the settings menu.
+     * "days": removes anything older than N days. "count": keeps only the
+     * N most recently added files, removing the rest. Runs on every
+     * refresh() (after every upload/delete and on app foreground), which
+     * is plenty responsive for a cleanup rule measured in days or dozens
+     * of files.
+     */
+    private fun applyAutoCleanup() {
+        val mode = CastState.autoCleanupMode.value
+        if (mode != "days" && mode != "count") return
+        val value = CastState.autoCleanupValue.value.coerceAtLeast(1)
+
+        val files = (mediaDir.listFiles() ?: emptyArray())
+            .filter { it.isFile && it.name.contains('~') }
+            .sortedBy { it.name.substringBefore('-').toLongOrNull() ?: it.lastModified() }
+
+        val toDelete = when (mode) {
+            "days" -> {
+                val cutoff = System.currentTimeMillis() - value * 24L * 3600_000L
+                files.filter { (it.name.substringBefore('-').toLongOrNull() ?: it.lastModified()) < cutoff }
+            }
+            else -> { // "count"
+                val excess = files.size - value
+                if (excess > 0) files.take(excess) else emptyList()
+            }
+        }
+
+        for (f in toDelete) {
+            val id = f.name
+            if (CastState.currentId.value == id) CastState.commands.tryEmit(Command.Stop)
+            f.delete()
+            File(thumbDir, "$id.jpg").delete()
+        }
     }
 
     fun fileOf(id: String): File? {

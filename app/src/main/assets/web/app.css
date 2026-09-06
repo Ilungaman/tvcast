@@ -118,10 +118,11 @@ input[type=range]::-webkit-slider-thumb {
 .chip.danger { color: var(--danger); }
 
 .interval { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 8px; }
-.interval select {
+.interval select, .interval input {
   background: var(--card-2); color: var(--text);
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font-size: 14px;
 }
+.interval input[type=number] { width: 64px; }
 
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 @media (min-width: 520px) { .grid { grid-template-columns: repeat(4, 1fr); } }
@@ -146,6 +147,40 @@ input[type=range]::-webkit-slider-thumb {
   width: 26px; height: 26px; border-radius: 50%;
   border: none; background: rgba(0,0,0,.6); color: #fff; font-size: 15px; line-height: 1;
 }
+
+.pin-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(11, 14, 17, .96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.pin-box {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+.pin-box .card-title { margin-bottom: 16px; }
+#pinInput {
+  width: 100%;
+  font-size: 32px;
+  letter-spacing: 12px;
+  text-align: center;
+  background: var(--card-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 10px;
+  margin-bottom: 14px;
+}
+#pinError { color: var(--danger); }
 
 .toast {
   position: fixed;

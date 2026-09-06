@@ -63,13 +63,27 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 get("/app.js") { call.respondAsset("web/app.js", ContentType.Text.JavaScript) }
                 get("/health") { call.respondText("ok") }
 
+                // ---- вход по PIN-коду (PIN показан на экране телевизора) ----
+                post("/api/auth") {
+                    val body = runCatching { JSONObject(call.receiveText()) }.getOrNull()
+                    val pin = body?.optString("pin").orEmpty()
+                    if (pin.isNotEmpty() && pin == PinAuth.pin) {
+                        call.grantAuth()
+                        call.respond(HttpStatusCode.OK)
+                    } else {
+                        call.respond(HttpStatusCode.Unauthorized)
+                    }
+                }
+
                 // ---- состояние ----
                 get("/api/state") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@get }
                     call.respondText(stateJson().toString(), ContentType.Application.Json)
                 }
 
                 // ---- команды пульта ----
                 post("/api/cmd") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@post }
                     val body = runCatching { JSONObject(call.receiveText()) }.getOrNull()
                     if (body == null) {
                         call.respond(HttpStatusCode.BadRequest, "bad json")
@@ -81,6 +95,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
 
                 // ---- загрузка файлов с iPhone ----
                 post("/api/upload") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@post }
                     val saved = JSONArray()
                     try {
                         val multipart = call.receiveMultipart()
@@ -111,6 +126,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
 
                 // ---- отдача файла с поддержкой Range (206 Partial Content) ----
                 get("/media/{id}") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@get }
                     val id = call.parameters["id"].orEmpty()
                     val file: File? = MediaRepo.fileOf(id)
                     if (file == null) {
@@ -122,6 +138,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 }
 
                 get("/thumb/{id}") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@get }
                     val id = call.parameters["id"].orEmpty()
                     val thumb = withContext(Dispatchers.IO) { MediaRepo.thumbnail(id) }
                     if (thumb == null) {
@@ -132,6 +149,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 }
 
                 delete("/api/media/{id}") {
+                    if (!call.isAuthorized()) { call.respond(HttpStatusCode.Unauthorized); return@delete }
                     val id = call.parameters["id"].orEmpty()
                     if (CastState.currentId.value == id) CastState.commands.tryEmit(Command.Stop)
                     withContext(Dispatchers.IO) { MediaRepo.delete(id) }
@@ -140,6 +158,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
 
                 // ---- живое состояние + команды по WebSocket ----
                 webSocket("/ws") {
+                    if (!call.isAuthorized()) { close(); return@webSocket }
                     val pusher = launch {
                         while (isActive) {
                             runCatching { send(Frame.Text(stateJson().toString())) }
@@ -187,6 +206,16 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             "mute" -> CastState.commands.emit(Command.Mute(body.optBoolean("on")))
             "repeat" -> CastState.commands.emit(Command.RepeatOne(body.optBoolean("on")))
             "transition" -> CastState.commands.emit(Command.Transition(body.optString("effect", "fade")))
+            "cleanup" -> {
+                // Direct state mutation, not routed through the commands flow like
+                // most actions: MediaRepo.refresh() right below needs the new
+                // values immediately, and going through MainActivity's async
+                // collector first would race it -- refresh() could run against
+                // the still-old settings.
+                CastState.autoCleanupMode.value = body.optString("mode", "off")
+                CastState.autoCleanupValue.value = body.optInt("value", 30).coerceAtLeast(1)
+                withContext(Dispatchers.IO) { MediaRepo.refresh() }
+            }
             "delete" -> {
                 val id = body.optString("id")
                 if (CastState.currentId.value == id) CastState.commands.emit(Command.Stop)
@@ -222,12 +251,36 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("slideshow", CastState.slideshowOn.value)
             .put("interval", CastState.slideshowInterval.value)
             .put("transition", CastState.transitionEffect.value.name.lowercase())
+            .put("cleanupMode", CastState.autoCleanupMode.value)
+            .put("cleanupValue", CastState.autoCleanupValue.value)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })
             .put("freeBytes", MediaRepo.freeBytes())
             .put("serverUrl", CastState.serverUrl.value)
             .put("error", CastState.lastError.value)
+    }
+
+    /**
+     * Plain Cookie/Set-Cookie header handling instead of Ktor's typed
+     * cookie helpers -- deliberately the most version-stable API surface
+     * available (ApplicationRequest.headers / ApplicationResponse.header
+     * haven't changed shape across Ktor releases), since this is going
+     * out without a local build to verify it compiles first.
+     */
+    private fun io.ktor.server.application.ApplicationCall.isAuthorized(): Boolean {
+        val cookieHeader = request.headers["Cookie"] ?: return false
+        val wanted = "tvcast_pin=${PinAuth.pin}"
+        return cookieHeader.split(";").any { it.trim() == wanted }
+    }
+
+    private fun io.ktor.server.application.ApplicationCall.grantAuth() {
+        // response.headers.append() (a plain member method, needing no
+        // extra import) rather than the header()/cookies typed helpers --
+        // same reasoning as isAuthorized(). Max-Age in seconds, ~1 year: a
+        // PIN entered once shouldn't need re-entering every visit, only
+        // after clearing site data or an actual PIN change.
+        response.headers.append("Set-Cookie", "tvcast_pin=${PinAuth.pin}; Path=/; Max-Age=31536000")
     }
 
     private suspend fun io.ktor.server.application.ApplicationCall.respondAsset(

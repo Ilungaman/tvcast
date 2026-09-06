@@ -113,6 +113,24 @@
                         android:text="Телефон и телевизор должны быть в одной сети Wi-Fi.\nИли наведите камеру iPhone на QR-код."
                         android:textColor="#7E8B99"
                         android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="При первом входе сайт спросит PIN-код:"
+                        android:textColor="#7E8B99"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/pinText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="----"
+                        android:textColor="#4FC3F7"
+                        android:textSize="26sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <ImageView

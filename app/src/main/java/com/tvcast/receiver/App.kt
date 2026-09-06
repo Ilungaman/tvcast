@@ -9,6 +9,7 @@ class App : Application() {
         super.onCreate()
         instance = this
         MediaRepo.init(this)
+        PinAuth.init(this)
     }
 
     companion object {

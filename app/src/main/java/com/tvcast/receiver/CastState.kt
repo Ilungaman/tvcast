@@ -55,6 +55,9 @@ object CastState {
     val slideshowOn = MutableStateFlow(false)
     val slideshowInterval = MutableStateFlow(6)
     val transitionEffect = MutableStateFlow(TransitionEffect.FADE)
+    /** "off" | "days" | "count" -- see MediaRepo.applyAutoCleanup(). */
+    val autoCleanupMode = MutableStateFlow("off")
+    val autoCleanupValue = MutableStateFlow(30)
     val muted = MutableStateFlow(false)
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")

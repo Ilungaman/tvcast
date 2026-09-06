@@ -11,6 +11,15 @@
 </head>
 <body>
 
+<div class="pin-gate" id="pinGate" hidden>
+  <div class="pin-box">
+    <div class="card-title">Введите PIN с экрана телевизора</div>
+    <input id="pinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000">
+    <button class="btn primary" id="pinSubmit">Войти</button>
+    <p class="hint" id="pinError" hidden>Неверный PIN, попробуйте ещё раз.</p>
+  </div>
+</div>
+
 <header class="bar">
   <div class="brand">
     <span class="dot" id="dot"></span>
@@ -95,12 +104,29 @@
   </section>
 
   <section class="card">
-    <div class="card-title row">
-      <span>На телевизоре</span>
-      <button class="chip danger" id="clearBtn">Очистить всё</button>
-    </div>
+    <div class="card-title">На телевизоре</div>
     <div class="grid" id="grid"></div>
     <p class="hint" id="emptyHint">Пока пусто.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Настройки</div>
+    <div class="row">
+      <label class="interval">
+        Автоочистка
+        <select id="cleanupMode">
+          <option value="off" selected>Выключена</option>
+          <option value="days">По времени</option>
+          <option value="count">По количеству</option>
+        </select>
+      </label>
+      <label class="interval" id="cleanupValueWrap" hidden>
+        <span id="cleanupValueLabel">Дней</span>
+        <input id="cleanupValue" type="number" min="1" value="30">
+      </label>
+    </div>
+    <p class="hint">«По времени» удаляет файлы старше указанного числа дней. «По количеству» оставляет только последние N файлов, остальные стираются автоматически.</p>
+    <button class="chip danger" id="clearBtn">Очистить всё сейчас</button>
   </section>
 
 </main>

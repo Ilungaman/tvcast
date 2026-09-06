@@ -161,7 +161,7 @@ class MainActivity : AppCompatActivity() {
         player?.pause()
         b.idleView.visibility = View.GONE
         b.playerView.visibility = View.GONE
-        b.photoView.visibility = View.GONE
+        resetPhotoViews()
         b.titleOverlay.visibility = View.GONE
         // Full screen until the first onVideoSize call letterboxes it to the
         // real aspect ratio -- avoids briefly showing a stale box sized from
@@ -447,6 +447,7 @@ class MainActivity : AppCompatActivity() {
             val zeroWidthSpace = '\u200B'
             url.removePrefix("http://").replaceFirst(":", ":$zeroWidthSpace")
         }
+        b.pinText.text = PinAuth.pin
         val err = CastState.lastError.value
         b.statusText.text = when {
             err.isNotBlank() -> err

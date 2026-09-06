@@ -101,6 +101,9 @@
     setChip($('slideChip'), s.slideshow, 'Слайдшоу вкл.', 'Слайдшоу выкл.');
     if (String(s.interval) !== $('interval').value) $('interval').value = String(s.interval);
     if (s.transition && s.transition !== $('transition').value) $('transition').value = s.transition;
+    if (s.cleanupMode && s.cleanupMode !== $('cleanupMode').value) $('cleanupMode').value = s.cleanupMode;
+    if (s.cleanupValue && Number($('cleanupValue').value) !== s.cleanupValue) $('cleanupValue').value = String(s.cleanupValue);
+    syncCleanupVisibility();
 
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
@@ -310,6 +313,26 @@
     cmd({ action: 'transition', effect: $('transition').value });
   });
 
+  function syncCleanupVisibility() {
+    var mode = $('cleanupMode').value;
+    $('cleanupValueWrap').hidden = mode === 'off';
+    $('cleanupValueLabel').textContent = mode === 'count' ? 'Файлов' : 'Дней';
+  }
+
+  function sendCleanup() {
+    cmd({
+      action: 'cleanup',
+      mode: $('cleanupMode').value,
+      value: parseInt($('cleanupValue').value, 10) || 30
+    });
+  }
+
+  $('cleanupMode').addEventListener('change', function () {
+    syncCleanupVisibility();
+    sendCleanup();
+  });
+  $('cleanupValue').addEventListener('change', sendCleanup);
+
   $('clearBtn').addEventListener('click', function () {
     if (confirm('Удалить все файлы с телевизора?')) { cmd({ action: 'clear' }); lastGridKey = ''; }
   });
@@ -335,6 +358,45 @@
     if (!document.hidden && uploading) requestWakeLock();
   });
 
-  connect();
-  startPolling();
+  // -------------------------------------------------------------------- вход
+
+  function submitPin() {
+    var pin = $('pinInput').value.trim();
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: pin })
+    }).then(function (r) {
+      if (r.ok) {
+        $('pinGate').hidden = true;
+        $('pinError').hidden = true;
+        connect();
+        startPolling();
+      } else {
+        $('pinError').hidden = false;
+      }
+    }).catch(function () { $('pinError').hidden = false; });
+  }
+
+  $('pinSubmit').addEventListener('click', submitPin);
+  $('pinInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') submitPin();
+  });
+
+  // A cookie from an earlier visit may already be valid -- ask once
+  // instead of always showing the gate, so returning visitors on the
+  // same phone don't have to re-enter the PIN every time.
+  fetch('/api/state').then(function (r) {
+    if (r.status === 401) {
+      $('pinGate').hidden = false;
+    } else {
+      connect();
+      startPolling();
+    }
+  }).catch(function () {
+    // Network hiccup on the very first load -- fall back to the normal
+    // polling/connect path, which will surface the real error itself.
+    connect();
+    startPolling();
+  });
 })();
