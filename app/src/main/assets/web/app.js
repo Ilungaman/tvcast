@@ -510,9 +510,14 @@
     });
   }
 
-  $('pinSubmit').addEventListener('click', submitPin);
-  $('pinInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') submitPin();
+  // A real form submit (not a click/keydown listener) -- this is what lets
+  // the phone keyboard's own "Go" button submit reliably. preventDefault()
+  // only stops the browser's own page-navigating submit; submitPin() still
+  // runs for every path in (tapping the button, tapping "Go" on the
+  // keyboard, or a hardware Enter key).
+  $('pinForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitPin();
   });
 
   // A cookie from an earlier visit may already be valid -- ask once

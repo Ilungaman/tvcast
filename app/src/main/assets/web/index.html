@@ -14,9 +14,15 @@
 <div class="pin-gate" id="pinGate" hidden>
   <div class="pin-box">
     <div class="card-title">Введите PIN с экрана телевизора</div>
-    <input id="pinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000">
-    <button class="btn primary" id="pinSubmit">Войти</button>
-    <p class="hint" id="pinError" hidden>Неверный PIN, попробуйте ещё раз.</p>
+    <!-- A real <form> so the phone's own keyboard "Go" button submits
+         natively -- a page-rendered button under position:fixed can miss
+         taps while iOS Safari's keyboard is open (a long-standing iOS
+         Safari layout bug), which looked exactly like "nothing happens". -->
+    <form id="pinForm">
+      <input id="pinInput" type="tel" inputmode="numeric" enterkeyhint="go" maxlength="4" autocomplete="off" placeholder="0000">
+      <button class="btn primary" id="pinSubmit" type="submit">Войти</button>
+      <p class="hint" id="pinError" hidden>Неверный PIN, попробуйте ещё раз.</p>
+    </form>
   </div>
 </div>
 
