@@ -74,6 +74,8 @@ class MainActivity : AppCompatActivity() {
     private var musicQueue: List<File> = emptyList()
     private var musicIdx = 0
 
+    private var airplayScrimJob: Job? = null
+
     // Written from the UI thread (surface lifecycle / mirror state), read
     // from UxPlay's native callback threads (video and audio each get
     // their own) -- @Volatile so a freshly assigned renderer is visible
@@ -86,6 +88,7 @@ class MainActivity : AppCompatActivity() {
         private const val IDLE_TIMEOUT_MS = 3 * 60_000L
         private const val SCREENSAVER_INTERVAL_MS = 8_000L
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
+        private const val AIRPLAY_WARMUP_MS = 1800L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -208,6 +211,23 @@ class MainActivity : AppCompatActivity() {
         lp.height = FrameLayout.LayoutParams.MATCH_PARENT
         b.airplaySurface.layoutParams = lp
         b.airplaySurface.visibility = View.VISIBLE
+
+        // iOS's mirroring encoder can take a moment to ramp up when a
+        // session starts, and whatever it sends before then can decode into
+        // visible colour-block/noise corruption for the first frame or two
+        // -- confirmed on the real TV: it clears up on its own after a
+        // couple of seconds. Rather than try to detect "the first clean
+        // frame" (MediaCodec has no notion of visual quality, so even a
+        // successfully decoded frame could still be one of the bad ones),
+        // just keep the surface covered for a fixed warm-up window.
+        b.airplayScrim.alpha = 1f
+        b.airplayScrim.visibility = View.VISIBLE
+        airplayScrimJob?.cancel()
+        airplayScrimJob = lifecycleScope.launch {
+            delay(AIRPLAY_WARMUP_MS)
+            b.airplayScrim.animate().alpha(0f).setDuration(300)
+                .withEndAction { b.airplayScrim.visibility = View.GONE }.start()
+        }
     }
 
     /** Letterboxes the mirrored picture instead of stretching it to fill the (landscape) TV screen. */
@@ -475,6 +495,10 @@ class MainActivity : AppCompatActivity() {
         b.playerView.visibility = View.GONE
         resetPhotoViews()
         b.airplaySurface.visibility = View.GONE
+        airplayScrimJob?.cancel()
+        airplayScrimJob = null
+        b.airplayScrim.animate().cancel()
+        b.airplayScrim.visibility = View.GONE
         b.titleOverlay.visibility = View.GONE
         b.idleView.animate().cancel()
         b.idleView.alpha = 1f
@@ -786,6 +810,7 @@ class MainActivity : AppCompatActivity() {
         screensaverJob?.cancel()
         clockJob?.cancel()
         weatherJob?.cancel()
+        airplayScrimJob?.cancel()
         player?.release()
         player = null
         musicPlayer?.release()

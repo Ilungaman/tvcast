@@ -39,6 +39,17 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- Закрывает airplaySurface, пока не придёт первый корректно
+         декодированный кадр: энкодер iOS первые кадры после начала
+         повтора экрана может отдавать "битыми", это видно как цветной
+         шум/блоки на пару секунд, пока он не выйдет на рабочий режим. -->
+    <View
+        android:id="@+id/airplayScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
     <!-- Экран ожидания -->
     <LinearLayout
         android:id="@+id/idleView"
