@@ -206,7 +206,10 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
 
                 // ---- живое состояние + команды по WebSocket ----
                 webSocket("/ws") {
-                    if (!call.isAuthorized()) { close(); return@webSocket }
+                    // Returning from this block (no reason to call an explicit
+                    // close()) ends the session and closes the connection --
+                    // Ktor tears it down as soon as the handler coroutine returns.
+                    if (!call.isAuthorized()) return@webSocket
                     val pusher = launch {
                         while (isActive) {
                             runCatching { send(Frame.Text(stateJson().toString())) }
