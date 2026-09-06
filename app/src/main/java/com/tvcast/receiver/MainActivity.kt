@@ -336,7 +336,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderIdleInfo() {
         val url = CastState.serverUrl.value
-        b.urlText.text = if (url.isBlank()) "нет сети" else url.removePrefix("http://")
+        // "192.168.1.27:8080" has no spaces or hyphens for the layout to break
+        // on, so when it doesn't fit on one line it was wrapping at an
+        // arbitrary character (mid-digit-group) instead of somewhere
+        // readable. A zero-width space after the colon is the only break
+        // point TextView will ever choose, so an unavoidable wrap lands
+        // between host and port instead.
+        b.urlText.text = if (url.isBlank()) {
+            "нет сети"
+        } else {
+            val zeroWidthSpace = '\u200B'
+            url.removePrefix("http://").replaceFirst(":", ":$zeroWidthSpace")
+        }
         val err = CastState.lastError.value
         b.statusText.text = when {
             err.isNotBlank() -> err
