@@ -64,9 +64,13 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 get("/health") { call.respondText("ok") }
 
                 // ---- вход по PIN-коду (PIN показан на экране телевизора) ----
-                post("/api/auth") {
-                    val body = runCatching { JSONObject(call.receiveText()) }.getOrNull()
-                    val pin = body?.optString("pin").orEmpty()
+                // GET с PIN в query-параметре, а не POST с JSON-телом: убирает
+                // из цепочки receiveText()/парсинг тела запроса целиком --
+                // раз PIN необъяснимо не срабатывал несколько сборок подряд
+                // без единой ошибки на клиенте, это сужает круг подозреваемых
+                // до чего-то более фундаментального, чем разбор тела запроса.
+                get("/api/auth") {
+                    val pin = call.request.queryParameters["pin"].orEmpty()
                     if (pin.isNotEmpty() && pin == PinAuth.pin) {
                         call.grantAuth()
                         call.respond(HttpStatusCode.OK)

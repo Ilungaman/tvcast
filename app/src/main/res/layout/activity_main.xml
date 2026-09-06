@@ -64,10 +64,10 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="16dp"
             android:text="@string/app_name"
-            android:textColor="#FFFFFF"
-            android:textSize="22sp"
+            android:textColor="#4FC3F7"
+            android:textSize="30sp"
             android:textStyle="bold" />
 
         <LinearLayout
@@ -95,19 +95,19 @@
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="6dp"
-                        android:text="🧭"
-                        android:textSize="15sp" />
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_marginEnd="7dp"
+                        android:src="@drawable/ic_browser"
+                        android:contentDescription="@null" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Способ 1 — Отправить файл"
                         android:textColor="#FFFFFF"
-                        android:textSize="13sp"
+                        android:textSize="15sp"
                         android:textStyle="bold" />
                 </LinearLayout>
 
@@ -118,7 +118,7 @@
                     android:gravity="center_horizontal"
                     android:text="Откройте Safari и введите адрес:"
                     android:textColor="#B9C4CF"
-                    android:textSize="11sp" />
+                    android:textSize="13sp" />
 
                 <TextView
                     android:id="@+id/urlText"
@@ -127,7 +127,7 @@
                     android:layout_marginTop="4dp"
                     android:text="—"
                     android:textColor="#4FC3F7"
-                    android:textSize="17sp"
+                    android:textSize="21sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -138,15 +138,15 @@
                     android:gravity="center_horizontal"
                     android:text="Одна сеть Wi-Fi с телевизором"
                     android:textColor="#7E8B99"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
 
                 <ImageView
                     android:id="@+id/qrView"
-                    android:layout_width="94dp"
-                    android:layout_height="94dp"
+                    android:layout_width="126dp"
+                    android:layout_height="126dp"
                     android:layout_marginTop="8dp"
                     android:background="@drawable/qr_card_bg"
-                    android:padding="6dp"
+                    android:padding="8dp"
                     android:contentDescription="@null" />
 
                 <TextView
@@ -156,7 +156,7 @@
                     android:gravity="center_horizontal"
                     android:text="При первом входе введите PIN:"
                     android:textColor="#7E8B99"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
 
                 <TextView
                     android:id="@+id/pinText"
@@ -165,7 +165,7 @@
                     android:layout_marginTop="2dp"
                     android:text="----"
                     android:textColor="#4FC3F7"
-                    android:textSize="17sp"
+                    android:textSize="21sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
@@ -185,37 +185,37 @@
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="6dp"
-                        android:text="📡"
-                        android:textSize="15sp" />
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_marginEnd="7dp"
+                        android:src="@drawable/ic_cast"
+                        android:contentDescription="@null" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Способ 2 — Повтор экрана (AirPlay)"
                         android:textColor="#FFFFFF"
-                        android:textSize="13sp"
+                        android:textSize="15sp"
                         android:textStyle="bold" />
                 </LinearLayout>
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:text="Откройте Пункт управления на iPhone → Повтор экрана → выберите «ТВ Витрина»."
                     android:textColor="#B9C4CF"
-                    android:textSize="11sp" />
+                    android:textSize="13sp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:text="Экран iPhone появится на телевизоре автоматически."
                     android:textColor="#7E8B99"
-                    android:textSize="10sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -260,11 +260,11 @@
             android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Большой оформленный блок часов+погоды для скринсейвера, когда
-         библиотека фото пуста (иначе это был бы просто чёрный экран без
-         часов). Отдельная view от ambientInfo (мелкие часы на экране
-         ожидания): у него другой масштаб и состав, и он должен быть
-         виден только в этом режиме скринсейвера. -->
+    <!-- Большой блок часов+погоды для скринсейвера, когда библиотека фото
+         пуста (иначе это был бы просто чёрный экран без часов). Оформлен в
+         стиле экрана блокировки iPhone: без карточки/рамки, просто крупный
+         текст поверх чёрного фона. Отдельная view от ambientInfo (мелкие
+         часы на экране ожидания) и видна только в этом режиме скринсейвера. -->
     <LinearLayout
         android:id="@+id/screensaverAmbient"
         android:layout_width="wrap_content"
@@ -272,11 +272,6 @@
         android:layout_gravity="top|start"
         android:orientation="vertical"
         android:gravity="center_horizontal"
-        android:background="@drawable/ambient_card_bg"
-        android:paddingStart="40dp"
-        android:paddingEnd="40dp"
-        android:paddingTop="32dp"
-        android:paddingBottom="32dp"
         android:visibility="gone">
 
         <TextView
@@ -284,48 +279,54 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textSize="88sp"
+            android:textSize="96sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/ssDateText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="#B9C4CF"
-            android:textSize="18sp" />
+            android:layout_marginTop="2dp"
+            android:textColor="#D0D6DC"
+            android:textSize="20sp" />
 
         <LinearLayout
             android:id="@+id/ssWeatherRow"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:layout_marginTop="28dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/ssWeatherEmoji"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="34sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/ssWeatherTemp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:textColor="#FFFFFF"
-                android:textSize="30sp"
-                android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/ssWeatherEmoji"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="30sp" />
+
+                <TextView
+                    android:id="@+id/ssWeatherTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="28sp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/ssWeatherCity"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:textColor="#8B98A6"
-                android:textSize="16sp" />
+                android:layout_marginTop="2dp"
+                android:textColor="#9AA4AE"
+                android:textSize="15sp" />
         </LinearLayout>
     </LinearLayout>
 

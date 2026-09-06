@@ -486,11 +486,26 @@
     btn.disabled = true;
     btn.textContent = 'Проверка…';
     $('pinError').hidden = true;
-    fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: pin })
-    }).then(function (r) {
+
+    // GET with the PIN as a query param instead of POST with a JSON body --
+    // removes request-body parsing from the picture entirely. Also guards
+    // against the request simply hanging forever with neither a response
+    // nor a network error (which would otherwise leave the button stuck on
+    // "Проверка…" with no feedback at all -- exactly what "nothing happens"
+    // looks like from outside): an 8s timeout via AbortController turns
+    // that into a visible, distinct error instead of silence.
+    var controller = ('AbortController' in window) ? new AbortController() : null;
+    var timedOut = false;
+    var timer = setTimeout(function () {
+      timedOut = true;
+      if (controller) controller.abort();
+    }, 8000);
+
+    var opts = { method: 'GET' };
+    if (controller) opts.signal = controller.signal;
+
+    fetch('/api/auth?pin=' + encodeURIComponent(pin), opts).then(function (r) {
+      clearTimeout(timer);
       btn.disabled = false;
       btn.textContent = 'Войти';
       if (r.ok) {
@@ -503,9 +518,12 @@
         $('pinError').hidden = false;
       }
     }).catch(function (e) {
+      clearTimeout(timer);
       btn.disabled = false;
       btn.textContent = 'Войти';
-      $('pinError').textContent = 'Ошибка сети: ' + (e && e.message ? e.message : e);
+      $('pinError').textContent = timedOut
+        ? 'Сервер не ответил за 8 секунд (запрос завис).'
+        : 'Ошибка сети: ' + (e && e.message ? e.message : e);
       $('pinError').hidden = false;
     });
   }

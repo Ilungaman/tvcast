@@ -125,6 +125,7 @@ class MainActivity : AppCompatActivity() {
         private const val SCREENSAVER_INTERVAL_MS = 8_000L
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
+        private const val WEATHER_RETRY_MS = 60_000L
         private const val CLOCK_TICK_MS = 33L
         private const val CLOCK_SPEED_DP_PER_SEC = 14f
         private const val CLOCK_EDGE_INSET_DP = 24f
@@ -706,8 +707,13 @@ class MainActivity : AppCompatActivity() {
                 if (info != null) {
                     clockAnchorEpochMs = info.localEpochMs
                     clockAnchorElapsedMs = android.os.SystemClock.elapsedRealtime()
+                    delay(WEATHER_REFRESH_MS)
+                } else {
+                    // A transient failure right at boot (Wi-Fi/DNS not fully
+                    // up yet) would otherwise mean no weather for a full 30
+                    // minutes -- retry much sooner instead.
+                    delay(WEATHER_RETRY_MS)
                 }
-                delay(WEATHER_REFRESH_MS)
             }
         }
     }
