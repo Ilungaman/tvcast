@@ -2,6 +2,7 @@ package com.tvcast.receiver.airplay
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
@@ -278,13 +279,46 @@ class AirPlayVideoRenderer(
         }
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
 
-        val mc = MediaCodec.createDecoderByType(mime)
+        val mc = createDecoder(mime)
         mc.configure(format, surface, null, 0)
         mc.start()
         codec = mc
         configured = true
         pendingParamSets.clear()
-        Log.i(TAG, "decoder configured: $mime")
+        Log.i(TAG, "decoder configured: $mime (${mc.codecInfo.name})")
+    }
+
+    /**
+     * createDecoderByType() picks whatever the platform lists first for
+     * this MIME type, which is *usually* the vendor's hardware decoder but
+     * isn't guaranteed on every device -- and a silently-selected software
+     * fallback would explain exactly the kind of motion-dependent judder
+     * seen here without it ever showing up as an error. Explicitly walk
+     * MediaCodecList and prefer a hardware-accelerated match (or, below
+     * API 29 where isHardwareAccelerated() doesn't exist, a codec name
+     * that isn't Google's own software reference decoder, which always
+     * starts with "omx.google."), falling back to createDecoderByType()
+     * if that search somehow comes up empty.
+     */
+    private fun createDecoder(mime: String): MediaCodec {
+        val candidates = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+        val hardware = candidates.firstOrNull { info ->
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                info.isHardwareAccelerated
+            } else {
+                !info.name.lowercase().startsWith("omx.google.")
+            }
+        }
+        val chosen = hardware ?: candidates.firstOrNull()
+        if (chosen == null) {
+            Log.w(TAG, "no MediaCodecList match for $mime, falling back to createDecoderByType")
+            return MediaCodec.createDecoderByType(mime)
+        }
+        if (hardware == null) {
+            Log.w(TAG, "no hardware-accelerated decoder found for $mime, using ${chosen.name}")
+        }
+        return MediaCodec.createByCodecName(chosen.name)
     }
 
     private fun releaseCodec() {

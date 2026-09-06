@@ -339,22 +339,6 @@ Java_com_tvcast_receiver_airplay_AirPlayReceiver_nativeStart(
         return JNI_FALSE;
     }
 
-    /* Confirmed against the real TV: panning video still judders even
-     * after every downstream fix tried (render pacing, decode threading,
-     * dropped-packet corruption). Panning frames are heavier specifically
-     * because of picture detail, not frame count -- width/height/maxFPS
-     * here are receiver-advertised values the sender (iPhone) actually
-     * encodes to (sent to it during the mirror handshake -- see
-     * raop_handlers.h's fpsetup response), so lowering them cuts the data
-     * the phone has to encode, transmit over Wi-Fi, and this device has to
-     * decode, at the source, rather than buffering around an actual
-     * throughput/decode shortfall further downstream. Defaults are
-     * 1920x1080@30fps (raop.c); requesting 1280x720@24fps trades picture
-     * sharpness for headroom during motion. */
-    raop_set_plist(g_raop, "width", 1280);
-    raop_set_plist(g_raop, "height", 720);
-    raop_set_plist(g_raop, "maxFPS", 24);
-
     unsigned short tcp[3] = {0, 0, 0};
     unsigned short udp[3] = {0, 0, 0};
     raop_set_tcp_ports(g_raop, tcp);
