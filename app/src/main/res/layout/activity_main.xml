@@ -327,6 +327,15 @@
                 android:layout_marginTop="2dp"
                 android:textColor="#9AA4AE"
                 android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ssWeatherForecast"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:textColor="#9AA4AE"
+                android:textSize="14sp"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 

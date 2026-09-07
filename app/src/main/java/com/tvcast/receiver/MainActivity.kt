@@ -38,6 +38,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -71,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private var clockMoveJob: Job? = null
 
     private var lastWeatherInfo: WeatherInfo? = null
+    private var resolvedTimeZone: TimeZone? = null
 
     // Continuous slow movement across the screen so the clock/weather
     // overlay never sits still long enough to burn into the panel --
@@ -676,16 +678,19 @@ class MainActivity : AppCompatActivity() {
         clockJob?.cancel()
         clockJob = lifecycleScope.launch {
             while (true) {
-                // Reverted to the device's own clock/timezone: IP geolocation
-                // is only ever approximate, and it resolved to the wrong
-                // timezone by a full 2 hours on the real device this was
-                // tested on -- strictly worse than the TV's own clock, which
-                // syncs over the network and is correct for the vast
-                // majority of users. Weather (a few km off doesn't matter)
-                // keeps using IP geolocation; only the clock's time source
-                // reverted.
+                // The device's absolute clock (System.currentTimeMillis()) is
+                // trustworthy -- Android syncs it over the network regardless
+                // of the *timezone* the TV was set up with. It's the
+                // timezone that can be wrong (installer picked the wrong
+                // one, or left a default), which is what caused the earlier
+                // "2 hours off" report. So: real device time, but rendered in
+                // the timezone resolved from the TV's own IP address
+                // (resolvedTimeZone, refreshed by weatherJob below), falling
+                // back to the device's own timezone only if that lookup
+                // hasn't succeeded yet.
                 val nowMs = System.currentTimeMillis()
-                val clockText = formatClock(nowMs, CastState.clockStyle.value)
+                val tz = resolvedTimeZone ?: TimeZone.getDefault()
+                val clockText = formatClock(nowMs, CastState.clockStyle.value, tz)
                 setTextIfChanged(b.clockText, clockText)
                 b.clockText.textSize = CastState.clockFontSize.value.toFloat()
                 b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
@@ -703,15 +708,24 @@ class MainActivity : AppCompatActivity() {
                 // pairs. Skipping the redundant set (the date column, unlike
                 // the clock, only actually changes once a day) fixes that
                 // and avoids 86400 pointless re-layouts a day besides.
-                setTextIfChanged(b.ssDateText, formatDate(nowMs))
+                setTextIfChanged(b.ssDateText, formatDate(nowMs, tz))
                 delay(1000L)
             }
         }
         weatherJob?.cancel()
         weatherJob = lifecycleScope.launch {
             while (true) {
-                val info = WeatherProvider.fetch()
+                if (!CastState.weatherEnabled.value) {
+                    lastWeatherInfo = null
+                    renderWeatherViews(null)
+                    delay(WEATHER_RETRY_MS)
+                    continue
+                }
+                val info = WeatherProvider.fetch(CastState.weatherForecastDays.value)
                 lastWeatherInfo = info
+                info?.timeZoneId?.let { id ->
+                    try { resolvedTimeZone = TimeZone.getTimeZone(id) } catch (t: Throwable) { /* keep previous */ }
+                }
                 renderWeatherViews(info)
                 if (info != null) {
                     delay(WEATHER_REFRESH_MS)
@@ -726,7 +740,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderWeatherViews(info: WeatherInfo?) {
-        if (info == null) {
+        if (info == null || !CastState.weatherEnabled.value) {
             b.weatherText.visibility = View.GONE
             b.ssWeatherRow.visibility = View.GONE
             return
@@ -737,13 +751,19 @@ class MainActivity : AppCompatActivity() {
         b.ssWeatherEmoji.text = info.emoji
         b.ssWeatherTemp.text = temp
         b.ssWeatherCity.text = info.city
+        if (info.forecast.size > 1) {
+            b.ssWeatherForecast.text = info.forecast.drop(1)
+                .joinToString("   ") { "${it.label} ${it.emoji} ${it.maxC}°/${it.minC}°" }
+            b.ssWeatherForecast.visibility = View.VISIBLE
+        } else {
+            b.ssWeatherForecast.visibility = View.GONE
+        }
         b.ssWeatherRow.visibility = View.VISIBLE
     }
 
-    private fun formatDate(epochMs: Long): String {
-        // Device's own timezone, matching formatClock() -- see the note in
-        // startAmbientUpdaters() on why the clock reverted to device time.
+    private fun formatDate(epochMs: Long, tz: TimeZone): String {
         val fmt = SimpleDateFormat("EEEE, d MMMM", Locale("ru"))
+        fmt.timeZone = tz
         val text = fmt.format(Date(epochMs))
         return text.replaceFirstChar { it.titlecase(Locale("ru")) }
     }
@@ -932,13 +952,14 @@ class MainActivity : AppCompatActivity() {
         wanderTargetY = minY + Math.random().toFloat() * (maxY - minY)
     }
 
-    private fun formatClock(epochMs: Long, style: String): String {
+    private fun formatClock(epochMs: Long, style: String, tz: TimeZone): String {
         val pattern = when (style) {
             "digital12" -> "hh:mm a"
             "seconds" -> "HH:mm:ss"
             else -> "HH:mm"
         }
         val fmt = SimpleDateFormat(pattern, Locale.getDefault())
+        fmt.timeZone = tz
         return fmt.format(Date(epochMs))
     }
 

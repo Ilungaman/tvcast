@@ -141,7 +141,7 @@
   </section>
 
   <section class="card">
-    <div class="card-title">Часы и погода</div>
+    <div class="card-title">Часы</div>
     <div class="row">
       <label class="interval">
         Стиль часов
@@ -177,7 +177,22 @@
         </select>
       </label>
     </div>
-    <p class="hint">Часы и погода на экране ожидания постоянно двигаются, чтобы не выжигать пиксели телевизора. Время и погода определяются по IP-адресу телевизора, а не по системным часам устройства.</p>
+    <p class="hint">Часы на экране ожидания постоянно двигаются, чтобы не выжигать пиксели телевизора. Время берётся с самого телевизора, а часовой пояс — по его IP-адресу.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Погода</div>
+    <div class="row">
+      <button class="chip" id="weatherChip" data-act="weather">Погода вкл.</button>
+      <label class="interval">
+        Прогноз
+        <select id="weatherDays">
+          <option value="1" selected>На сегодня</option>
+          <option value="7">На неделю</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint">Город и температура определяются по IP-адресу телевизора. «На неделю» добавляет короткий прогноз на ближайшие дни под текущей погодой.</p>
   </section>
 
   <section class="card">

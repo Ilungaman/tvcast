@@ -103,7 +103,8 @@
       $('nowCard').hidden = false;
       $('nowThumb').src = '/thumb/' + encodeURIComponent(cur.id);
       $('nowName').textContent = cur.name;
-      $('nowSub').textContent = (cur.isVideo ? 'Видео' : 'Фото') + ' · ' + fmtSize(cur.size);
+      $('nowSub').textContent = (cur.isVideo ? 'Видео' : 'Фото') + ' · ' + fmtSize(cur.size) +
+        (cur.caption ? ' · подпись: «' + cur.caption + '»' : '');
       $('playBtn').textContent = s.playing ? '❚❚' : '▶';
       $('seekWrap').style.display = cur.isVideo && s.duration > 0 ? '' : 'none';
       if (!seeking && s.duration > 0) {
@@ -135,6 +136,11 @@
     if (s.clockFontSize && Number($('clockFontSize').value) !== s.clockFontSize) $('clockFontSize').value = String(s.clockFontSize);
     if (s.clockColor && s.clockColor !== $('clockColor').value) $('clockColor').value = s.clockColor;
     if (s.clockMotion && s.clockMotion !== $('clockMotion').value) $('clockMotion').value = s.clockMotion;
+
+    setChip($('weatherChip'), s.weatherEnabled, 'Погода вкл.', 'Погода выкл.');
+    if (s.weatherForecastDays && String(s.weatherForecastDays) !== $('weatherDays').value) {
+      $('weatherDays').value = String(s.weatherForecastDays);
+    }
 
     // сетка
     var key = s.items.map(function (x) { return x.id; }).join('|') + '#' + s.currentId;
@@ -279,6 +285,7 @@
 
     var firstId = null;
     var idx = 0;
+    var captionSent = $('captionInput').value.trim();
 
     function next() {
       if (idx >= list.length) {
@@ -287,7 +294,8 @@
         lastGridKey = '';
         if (firstId) cmd({ action: 'show', id: firstId });
         setTimeout(function () { $('queueCard').hidden = true; }, 1200);
-        toast('Готово: ' + list.length + ' файл(ов) на телевизоре');
+        toast('Готово: ' + list.length + ' файл(ов) на телевизоре' +
+          (captionSent ? ' · подпись «' + captionSent + '» сохранена' : ''));
         return;
       }
       var file = list[idx];
@@ -296,7 +304,12 @@
       var pct = row.querySelector('.pct');
 
       var fd = new FormData();
-      if (!$('captionInput').hidden && $('captionInput').value.trim()) {
+      // Not gated on $('captionInput').hidden: relying on a "hidden" DOM
+      // check to decide whether to send data has already caused one silent
+      // bug this session (the PIN gate CSS override) -- simpler and just as
+      // correct to send whatever text is actually typed, regardless of the
+      // field's current visibility.
+      if ($('captionInput').value.trim()) {
         fd.append('caption', $('captionInput').value.trim());
       }
       fd.append('file', file, file.name);
@@ -384,6 +397,11 @@
       interval: parseInt($('interval').value, 10) || 6
     });
     else if (act === 'captions') cmd({ action: 'captions', on: !(state && state.captionsEnabled) });
+    else if (act === 'weather') cmd({
+      action: 'weather',
+      on: !(state && state.weatherEnabled),
+      days: parseInt($('weatherDays').value, 10) || 1
+    });
     else if (act === 'music') cmd({
       action: 'music',
       on: !(state && state.musicEnabled),
@@ -414,6 +432,14 @@
   $('clockFontSize').addEventListener('change', sendClockSettings);
   $('clockColor').addEventListener('change', sendClockSettings);
   $('clockMotion').addEventListener('change', sendClockSettings);
+
+  $('weatherDays').addEventListener('change', function () {
+    cmd({
+      action: 'weather',
+      on: !!(state && state.weatherEnabled),
+      days: parseInt($('weatherDays').value, 10) || 1
+    });
+  });
 
   $('interval').addEventListener('change', function () {
     cmd({

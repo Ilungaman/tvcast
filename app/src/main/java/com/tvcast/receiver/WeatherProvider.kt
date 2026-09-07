@@ -5,52 +5,109 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-data class WeatherInfo(val city: String, val tempC: Double, val emoji: String)
+data class WeatherInfo(
+    val city: String,
+    val tempC: Double,
+    val emoji: String,
+    val timeZoneId: String?,
+    /** Empty unless a multi-day forecast was requested; day 0 is today. */
+    val forecast: List<DayForecast> = emptyList()
+)
+
+data class DayForecast(val label: String, val emoji: String, val maxC: Int, val minC: Int)
 
 /**
- * City-level weather for the idle screen, with no API key and no user
- * setup: an IP-geolocation lookup on the TV's own public IP (city-level
- * accuracy, which is all a stationary living-room display needs) feeds
- * open-meteo.com (free, keyless) for a current temperature/condition.
- * Best-effort; any failure just means the weather line doesn't show, same
- * as if it were never enabled. (The clock itself uses the device's own
- * time/timezone, not this -- IP geolocation is only ever approximate, and
- * resolving to the wrong timezone by whole hours is a real, observed
- * failure mode of it, worse than just trusting the TV's own clock.)
+ * City-level weather AND the TV's real timezone for the idle screen, with
+ * no API key and no user setup: an IP-geolocation lookup on the TV's own
+ * public IP (city-level accuracy, which is all a stationary living-room
+ * display needs) feeds open-meteo.com (free, keyless) for a current
+ * temperature/condition, and separately hands back the resolved IANA
+ * timezone id (e.g. "Europe/Moscow") straight from the geolocation
+ * service's own response.
+ *
+ * The clock deliberately does NOT get its absolute time from here (see
+ * MainActivity): the device's own System.currentTimeMillis() is already
+ * correct in virtually all cases (Android syncs it over the network
+ * regardless of how its *timezone* setting was configured), so there is
+ * no need to parse a wall-clock string out of a weather API response --
+ * that turned out to be the fragile part. What genuinely can be wrong on
+ * a TV is the *timezone* it was set up with (installer picked the wrong
+ * one, or never touched a default), which is exactly what this resolves
+ * instead: real device clock + IP-resolved timezone, not IP-resolved
+ * clock. Both this and the weather lookup itself are best-effort; any
+ * failure just means the weather line doesn't show and the clock keeps
+ * using the device's own timezone, same as if this were never enabled.
  */
 object WeatherProvider {
     private const val TAG = "WeatherProvider"
 
-    suspend fun fetch(): WeatherInfo? {
+    /** @param forecastDays 1 for just today's current conditions, 7 for a week-ahead outlook too. */
+    suspend fun fetch(forecastDays: Int = 1): WeatherInfo? {
         return try {
-            val (lat, lon, city) = fetchGeo() ?: return null
+            val geo = fetchGeo() ?: return null
 
-            val url = "https://api.open-meteo.com/v1/forecast" +
-                "?latitude=$lat&longitude=$lon&current_weather=true"
+            var url = "https://api.open-meteo.com/v1/forecast" +
+                "?latitude=${geo.lat}&longitude=${geo.lon}&current_weather=true"
+            if (forecastDays > 1) {
+                url += "&daily=weathercode,temperature_2m_max,temperature_2m_min" +
+                    "&forecast_days=$forecastDays&timezone=auto"
+            }
             val wx = fetchJson(url) ?: return null
             val cw = wx.getJSONObject("current_weather")
             val temp = cw.getDouble("temperature")
             val code = cw.getInt("weathercode")
-            WeatherInfo(city, temp, emojiFor(code))
+            val forecast = if (forecastDays > 1) parseDaily(wx) else emptyList()
+            WeatherInfo(geo.city, temp, emojiFor(code), geo.timeZoneId, forecast)
         } catch (t: Throwable) {
             Log.w(TAG, "weather fetch failed", t)
             null
         }
     }
 
+    private val dayLabels = arrayOf("Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб")
+
+    /** Turns open-meteo's parallel daily arrays into one [DayForecast] per day; today is index 0. */
+    private fun parseDaily(wx: JSONObject): List<DayForecast> {
+        val daily = wx.optJSONObject("daily") ?: return emptyList()
+        val codes = daily.optJSONArray("weathercode") ?: return emptyList()
+        val maxes = daily.optJSONArray("temperature_2m_max") ?: return emptyList()
+        val mins = daily.optJSONArray("temperature_2m_min") ?: return emptyList()
+        val cal = java.util.Calendar.getInstance()
+        val out = ArrayList<DayForecast>()
+        for (i in 0 until codes.length()) {
+            val label = if (i == 0) "Сегодня" else dayLabels[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]
+            out.add(
+                DayForecast(
+                    label,
+                    emojiFor(codes.getInt(i)),
+                    maxes.getDouble(i).roundToIntOrZero(),
+                    mins.getDouble(i).roundToIntOrZero()
+                )
+            )
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }
+        return out
+    }
+
+    private fun Double.roundToIntOrZero(): Int = if (isNaN()) 0 else Math.round(this).toInt()
+
+    private data class Geo(val lat: Double, val lon: Double, val city: String, val timeZoneId: String?)
+
     /**
      * Two independent free/keyless IP-geolocation services, tried in
      * order: ip-api.com is plain HTTP, which some networks/routers
      * intercept or block outright (ISP deep-packet-inspection boxes,
      * ad-injection middleboxes, etc.); ipapi.co is HTTPS, immune to that
-     * specific class of interference.
+     * specific class of interference. Both report an IANA timezone id
+     * directly, no parsing of any time-of-day string required.
      */
-    private fun fetchGeo(): Triple<Double, Double, String>? {
+    private fun fetchGeo(): Geo? {
         try {
             val geo = fetchJson("http://ip-api.com/json/")
             if (geo != null && geo.optString("status") == "success") {
                 val city = geo.optString("city").ifBlank { geo.optString("regionName") }
-                return Triple(geo.getDouble("lat"), geo.getDouble("lon"), city)
+                val tz = geo.optString("timezone").ifBlank { null }
+                return Geo(geo.getDouble("lat"), geo.getDouble("lon"), city, tz)
             }
         } catch (t: Throwable) {
             Log.w(TAG, "ip-api.com geolocation failed", t)
@@ -59,7 +116,8 @@ object WeatherProvider {
             val geo = fetchJson("https://ipapi.co/json/")
             if (geo != null && geo.optString("error").isBlank()) {
                 val city = geo.optString("city").ifBlank { geo.optString("region") }
-                return Triple(geo.getDouble("latitude"), geo.getDouble("longitude"), city)
+                val tz = geo.optString("timezone").ifBlank { null }
+                return Geo(geo.getDouble("latitude"), geo.getDouble("longitude"), city, tz)
             }
         } catch (t: Throwable) {
             Log.w(TAG, "ipapi.co geolocation failed", t)

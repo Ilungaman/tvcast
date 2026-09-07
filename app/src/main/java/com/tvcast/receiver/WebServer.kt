@@ -286,6 +286,11 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                 val motion = body.optString("motion")
                 if (motion.isNotBlank()) CastState.clockMotionStyle.value = motion
             }
+            "weather" -> {
+                CastState.weatherEnabled.value = body.optBoolean("on", true)
+                val days = body.optInt("days", 1)
+                CastState.weatherForecastDays.value = if (days >= 7) 7 else 1
+            }
             "delete" -> {
                 val id = body.optString("id")
                 if (CastState.currentId.value == id) CastState.commands.emit(Command.Stop)
@@ -340,6 +345,8 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
             .put("clockFontSize", CastState.clockFontSize.value)
             .put("clockColor", CastState.clockColor.value)
             .put("clockMotion", CastState.clockMotionStyle.value)
+            .put("weatherEnabled", CastState.weatherEnabled.value)
+            .put("weatherForecastDays", CastState.weatherForecastDays.value)
             .put("muted", CastState.muted.value)
             .put("repeatOne", CastState.repeatOne.value)
             .put("usedBytes", CastState.items.value.sumOf { it.size })
