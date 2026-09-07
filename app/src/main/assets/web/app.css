@@ -131,6 +131,10 @@ input[type=range]::-webkit-slider-thumb {
 .chip.danger { color: var(--danger); }
 
 .interval { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 8px; }
+/* Same bug as .pin-gate above: an unconditional "display: flex" here beat
+   the [hidden] attribute app.js toggles on cleanupValueWrap, so that
+   field never actually hid when auto-cleanup was turned off. */
+.interval[hidden] { display: none; }
 .interval select, .interval input {
   background: var(--card-2); color: var(--text);
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font-size: 14px;
@@ -171,6 +175,16 @@ input[type=range]::-webkit-slider-thumb {
   justify-content: center;
   padding: 24px;
 }
+/* THE actual bug behind every "PIN does nothing" report this whole time:
+   an author stylesheet rule always beats the browser's own default
+   [hidden]{display:none} rule, even at equal selector specificity -- so
+   .pin-gate's unconditional "display: flex" above permanently overrode
+   the hidden attribute app.js sets on login success. Confirmed on a real
+   device via DevTools: the auth request returns 200 and the following
+   WebSocket connects (101) every time -- login was working the entire
+   session, the box just never visually closed either way, making success
+   and failure indistinguishable. */
+.pin-gate[hidden] { display: none; }
 .pin-box {
   background: var(--card);
   border: 1px solid var(--line);
