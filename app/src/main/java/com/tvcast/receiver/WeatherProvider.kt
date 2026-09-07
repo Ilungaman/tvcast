@@ -27,11 +27,7 @@ object WeatherProvider {
 
     suspend fun fetch(): WeatherInfo? {
         return try {
-            val geo = fetchJson("http://ip-api.com/json/") ?: return null
-            if (geo.optString("status") != "success") return null
-            val lat = geo.getDouble("lat")
-            val lon = geo.getDouble("lon")
-            val city = geo.optString("city").ifBlank { geo.optString("regionName") }
+            val (lat, lon, city) = fetchGeo() ?: return null
 
             val url = "https://api.open-meteo.com/v1/forecast" +
                 "?latitude=$lat&longitude=$lon&current_weather=true&timezone=auto"
@@ -45,6 +41,39 @@ object WeatherProvider {
             Log.w(TAG, "weather fetch failed", t)
             null
         }
+    }
+
+    /**
+     * Two independent free/keyless IP-geolocation services, tried in
+     * order: ip-api.com is plain HTTP, which some networks/routers
+     * intercept or block outright (ISP deep-packet-inspection boxes,
+     * ad-injection middleboxes, etc.); ipapi.co is HTTPS, immune to that
+     * specific class of interference. Weather went missing persistently
+     * (not just once) on the real device this was tested on, which points
+     * at exactly this kind of network-level block on the HTTP source
+     * rather than a one-off hiccup -- trying a second, HTTPS-only source
+     * covers that without needing to diagnose their specific network.
+     */
+    private fun fetchGeo(): Triple<Double, Double, String>? {
+        try {
+            val geo = fetchJson("http://ip-api.com/json/")
+            if (geo != null && geo.optString("status") == "success") {
+                val city = geo.optString("city").ifBlank { geo.optString("regionName") }
+                return Triple(geo.getDouble("lat"), geo.getDouble("lon"), city)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "ip-api.com geolocation failed", t)
+        }
+        try {
+            val geo = fetchJson("https://ipapi.co/json/")
+            if (geo != null && geo.optString("error").isBlank()) {
+                val city = geo.optString("city").ifBlank { geo.optString("region") }
+                return Triple(geo.getDouble("latitude"), geo.getDouble("longitude"), city)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "ipapi.co geolocation failed", t)
+        }
+        return null
     }
 
     /**

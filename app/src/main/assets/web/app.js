@@ -506,26 +506,39 @@
 
     fetch('/api/auth?pin=' + encodeURIComponent(pin), opts).then(function (r) {
       clearTimeout(timer);
-      btn.disabled = false;
-      btn.textContent = 'Войти';
       if (r.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Войти';
         $('pinGate').hidden = true;
         $('pinError').hidden = true;
         connect();
         startPolling();
       } else {
-        $('pinError').textContent = 'Неверный PIN (ответ сервера: ' + r.status + ').';
-        $('pinError').hidden = false;
+        showPinFailure('Сервер ответил: ' + r.status + ' (PIN не подошёл)');
       }
     }).catch(function (e) {
       clearTimeout(timer);
-      btn.disabled = false;
-      btn.textContent = 'Войти';
-      $('pinError').textContent = timedOut
-        ? 'Сервер не ответил за 8 секунд (запрос завис).'
-        : 'Ошибка сети: ' + (e && e.message ? e.message : e);
-      $('pinError').hidden = false;
+      showPinFailure(timedOut
+        ? 'Сервер не ответил за 8 секунд (запрос завис)'
+        : 'Ошибка сети: ' + (e && e.message ? e.message : e));
     });
+
+    // The button reverting to a plain "Войти" after a failure looked
+    // identical to "nothing happened" -- a small line of text below it is
+    // too easy to miss on a phone screen in the same glance. The outcome
+    // now shows ON the button itself (stays there, doesn't auto-revert)
+    // and pinError is forced to large bold red text via inline styles so
+    // there is no way to describe this as silent any more.
+    function showPinFailure(message) {
+      btn.disabled = false;
+      btn.textContent = 'Не удалось — ещё раз';
+      var err = $('pinError');
+      err.textContent = message;
+      err.hidden = false;
+      err.style.color = '#ff453a';
+      err.style.fontWeight = 'bold';
+      err.style.fontSize = '15px';
+    }
   }
 
   // A real form submit (not a click/keydown listener) -- this is what lets
