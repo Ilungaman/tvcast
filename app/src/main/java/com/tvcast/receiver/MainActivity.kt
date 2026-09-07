@@ -38,7 +38,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -71,13 +70,6 @@ class MainActivity : AppCompatActivity() {
     private var weatherJob: Job? = null
     private var clockMoveJob: Job? = null
 
-    // Anchors the ticking clock to the last IP-derived local time (see
-    // WeatherProvider) plus elapsed real time since -- not the device's own
-    // clock/timezone, which a TV can easily have wrong or never set.
-    // Seeded from the device clock only as a best-effort fallback until the
-    // first successful fetch.
-    private var clockAnchorEpochMs: Long = System.currentTimeMillis()
-    private var clockAnchorElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
     private var lastWeatherInfo: WeatherInfo? = null
 
     // Continuous slow movement across the screen so the clock/weather
@@ -684,8 +676,17 @@ class MainActivity : AppCompatActivity() {
         clockJob?.cancel()
         clockJob = lifecycleScope.launch {
             while (true) {
-                val nowMs = clockAnchorEpochMs + (android.os.SystemClock.elapsedRealtime() - clockAnchorElapsedMs)
-                b.clockText.text = formatClock(nowMs, CastState.clockStyle.value)
+                // Reverted to the device's own clock/timezone: IP geolocation
+                // is only ever approximate, and it resolved to the wrong
+                // timezone by a full 2 hours on the real device this was
+                // tested on -- strictly worse than the TV's own clock, which
+                // syncs over the network and is correct for the vast
+                // majority of users. Weather (a few km off doesn't matter)
+                // keeps using IP geolocation; only the clock's time source
+                // reverted.
+                val nowMs = System.currentTimeMillis()
+                val clockText = formatClock(nowMs, CastState.clockStyle.value)
+                setTextIfChanged(b.clockText, clockText)
                 b.clockText.textSize = CastState.clockFontSize.value.toFloat()
                 b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
                 // The big screensaver clock always uses its own large fixed
@@ -693,8 +694,16 @@ class MainActivity : AppCompatActivity() {
                 // preference, since this display is meant to be a striking
                 // ambient screen on its own, not a bigger copy of the corner
                 // clock.
-                b.ssClockText.text = formatClock(nowMs, CastState.clockStyle.value)
-                b.ssDateText.text = formatDate(nowMs)
+                setTextIfChanged(b.ssClockText, clockText)
+                // Re-setting a TextView's text to an equal-content but new
+                // String instance every second (formatDate() always returns
+                // a fresh String) was making a specific letter pair visibly
+                // jitter -- some system fonts' shaping/kerning isn't fully
+                // deterministic across repeated layout passes for certain
+                // pairs. Skipping the redundant set (the date column, unlike
+                // the clock, only actually changes once a day) fixes that
+                // and avoids 86400 pointless re-layouts a day besides.
+                setTextIfChanged(b.ssDateText, formatDate(nowMs))
                 delay(1000L)
             }
         }
@@ -705,8 +714,6 @@ class MainActivity : AppCompatActivity() {
                 lastWeatherInfo = info
                 renderWeatherViews(info)
                 if (info != null) {
-                    clockAnchorEpochMs = info.localEpochMs
-                    clockAnchorElapsedMs = android.os.SystemClock.elapsedRealtime()
                     delay(WEATHER_REFRESH_MS)
                 } else {
                     // A transient failure right at boot (Wi-Fi/DNS not fully
@@ -734,10 +741,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun formatDate(epochMs: Long): String {
+        // Device's own timezone, matching formatClock() -- see the note in
+        // startAmbientUpdaters() on why the clock reverted to device time.
         val fmt = SimpleDateFormat("EEEE, d MMMM", Locale("ru"))
-        fmt.timeZone = TimeZone.getTimeZone("UTC")
         val text = fmt.format(Date(epochMs))
         return text.replaceFirstChar { it.titlecase(Locale("ru")) }
+    }
+
+    /** Skips the redundant setText() call entirely when the value hasn't actually changed. */
+    private fun setTextIfChanged(view: android.widget.TextView, text: String) {
+        if (view.text.toString() != text) view.text = text
     }
 
     /**
@@ -926,7 +939,6 @@ class MainActivity : AppCompatActivity() {
             else -> "HH:mm"
         }
         val fmt = SimpleDateFormat(pattern, Locale.getDefault())
-        fmt.timeZone = TimeZone.getTimeZone("UTC")
         return fmt.format(Date(epochMs))
     }
 
