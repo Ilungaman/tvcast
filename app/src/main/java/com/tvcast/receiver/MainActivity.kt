@@ -676,6 +676,17 @@ class MainActivity : AppCompatActivity() {
                     handle(Command.Show(entry.id))
                     hideTvMenu()
                 }
+                // A second focusable delete button next to each tile would
+                // make D-pad LEFT/RIGHT hop confusingly between a tile's
+                // photo and its neighbor's trash icon (Android's focus
+                // finder works purely on geometry, not intended grouping).
+                // A long-press on the same OK button that already shows the
+                // tile keeps one focusable target per tile and reuses the
+                // exact gesture TV remotes already do for "more options".
+                setOnLongClickListener {
+                    confirmDeleteFromTvMenu(entry)
+                    true
+                }
             }
             grid.addView(tile)
             lifecycleScope.launch(Dispatchers.IO) {
@@ -683,6 +694,21 @@ class MainActivity : AppCompatActivity() {
                 if (bmp != null) withContext(Dispatchers.Main) { img.setImageBitmap(bmp) }
             }
         }
+    }
+
+    private fun confirmDeleteFromTvMenu(entry: MediaEntry) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Удалить файл?")
+            .setMessage(entry.name)
+            .setPositiveButton("Удалить") { _, _ ->
+                lifecycleScope.launch {
+                    if (CastState.currentId.value == entry.id) handle(Command.Stop)
+                    withContext(Dispatchers.IO) { MediaRepo.delete(entry.id) }
+                    populateTvMenuGrid()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     // -------------------------------------------------------- фоновая музыка
@@ -919,6 +945,12 @@ class MainActivity : AppCompatActivity() {
                 val tSec = (nowNs - clockMotionStartNs) / 1_000_000_000f
 
                 val (x, y) = when (CastState.clockMotionStyle.value) {
+                    // A constant, however slow, creep across the screen was
+                    // reported as visible trembling once the screensaver
+                    // block grew large (weather + the 6-day forecast row) --
+                    // giving a genuinely static option settles that instead
+                    // of continuing to guess at motion speeds/styles.
+                    "none" -> maxX to minY
                     "orbit" -> orbitPosition(tSec, minX, maxX, minY, maxY)
                     "lissajous" -> lissajousPosition(tSec, minX, maxX, minY, maxY)
                     "drift" -> driftPosition(tSec, minX, maxX, minY, maxY, driftAmpPx)

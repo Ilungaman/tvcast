@@ -104,6 +104,24 @@ input[type=range]::-webkit-slider-thumb {
   background: var(--accent); margin-top: -8.5px;
 }
 
+/* Safari's default <input type=color> is a tiny inset dot with a ring
+   around it -- barely shows the actual color. Filling the whole box with
+   the swatch (and dropping the native border/padding that caused the dot
+   in the first place) makes the picked color obvious at a glance. */
+input[type=color] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+}
+input[type=color]::-webkit-color-swatch-wrapper { padding: 0; border-radius: 10px; }
+input[type=color]::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 10px; }
+
 .controls { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .ctl {
   flex: 1;

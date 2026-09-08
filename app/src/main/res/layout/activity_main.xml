@@ -684,7 +684,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="Стрелки — выбрать, ОК — показать, Назад — закрыть меню"
+            android:text="Стрелки — выбрать, ОК — показать, долгое ОК — удалить, Назад — закрыть меню"
             android:textColor="#9AA4AE"
             android:textSize="13sp" />
 
