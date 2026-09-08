@@ -116,7 +116,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val IDLE_TIMEOUT_MS = 3 * 60_000L
-        private const val IDLE_CLOCK_SP = 28f
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
         private const val WEATHER_RETRY_MS = 60_000L
@@ -740,6 +739,22 @@ class MainActivity : AppCompatActivity() {
     private fun startAmbientUpdaters() {
         clockJob?.cancel()
         clockJob = lifecycleScope.launch {
+            // TextView.setTextSize() unconditionally calls requestLayout()
+            // internally, even when the new value equals the old one --
+            // calling it every second regardless of whether the setting
+            // actually changed was forcing a full relayout of the
+            // screensaver's centered clock/date/weather column every tick.
+            // That's what was making the date (and, once weather started
+            // working, the forecast row too) visibly twitch: floating-point
+            // text measurement isn't perfectly bit-identical across repeated
+            // layout passes, so gravity="center_horizontal" kept
+            // re-centering everything under it by a sub-pixel amount each
+            // second. Tracking what was last actually applied and skipping
+            // the call when nothing changed removes the forced relayout
+            // entirely for the (overwhelmingly common) case where the user
+            // hasn't touched the setting since the previous tick.
+            var lastAppliedSize = -1
+            var lastAppliedColor = ""
             while (true) {
                 // The device's absolute clock (System.currentTimeMillis()) is
                 // trustworthy -- Android syncs it over the network regardless
@@ -755,25 +770,26 @@ class MainActivity : AppCompatActivity() {
                 val tz = resolvedTimeZone ?: TimeZone.getDefault()
                 val clockText = formatClock(nowMs, CastState.clockStyle.value, tz)
                 setTextIfChanged(b.clockText, clockText)
-                // The small idle-corner clock keeps its own fixed size --
-                // the user's size setting targets the big screensaver clock
-                // below instead (that's the one actually meant to be read
-                // from across the room). Re-anchoring on every tick (rather
-                // than only once when the screen is entered) matters because
-                // this size can change live while already parked here: the
-                // corner clock's own font size never changes, but its width
-                // still does when the color/style change alters string
-                // length (e.g. AM/PM), so this keeps stopClockMotion()'s
-                // top-right anchor correct instead of drifting off-screen.
-                b.clockText.textSize = IDLE_CLOCK_SP
+                // The idle-corner clock's size is fixed (matches the XML
+                // default) and no longer user-configurable, so there's
+                // nothing to re-apply here every tick any more, only the
+                // anchor.
                 if (clockMoveJob == null) parkAmbientInfo()
-                // Color, like size above, is meant to style the big
-                // screensaver clock the user actually asked to customize --
-                // the small idle-corner clock stays fixed white, same as its
-                // now-fixed size, instead of also reacting to this setting.
+                // Color, like size, is meant to style the big screensaver
+                // clock the user actually asked to customize -- the small
+                // idle-corner clock stays its fixed XML white instead of
+                // also reacting to this setting.
                 setTextIfChanged(b.ssClockText, clockText)
-                b.ssClockText.textSize = CastState.clockFontSize.value.toFloat()
-                b.ssClockText.setTextColor(parseClockColor(CastState.clockColor.value))
+                val fontSize = CastState.clockFontSize.value
+                if (fontSize != lastAppliedSize) {
+                    b.ssClockText.textSize = fontSize.toFloat()
+                    lastAppliedSize = fontSize
+                }
+                val color = CastState.clockColor.value
+                if (color != lastAppliedColor) {
+                    b.ssClockText.setTextColor(parseClockColor(color))
+                    lastAppliedColor = color
+                }
                 // Re-setting a TextView's text to an equal-content but new
                 // String instance every second (formatDate() always returns
                 // a fresh String) was making a specific letter pair visibly
@@ -825,14 +841,28 @@ class MainActivity : AppCompatActivity() {
         b.ssWeatherEmoji.text = info.emoji
         b.ssWeatherTemp.text = temp
         b.ssWeatherCity.text = info.city
-        if (info.forecast.size > 1) {
-            b.ssWeatherForecast.text = info.forecast.drop(1)
-                .joinToString("   ") { "${it.label} ${it.emoji} ${it.maxC}°/${it.minC}°" }
-            b.ssWeatherForecast.visibility = View.VISIBLE
-        } else {
-            b.ssWeatherForecast.visibility = View.GONE
-        }
+        renderForecastColumns(info.forecast.drop(1))
         b.ssWeatherRow.visibility = View.VISIBLE
+    }
+
+    /** One column per day: day-of-week on top, icon, day (max) temp, then night (min) temp at the bottom. */
+    private fun renderForecastColumns(days: List<DayForecast>) {
+        val containers = listOf(b.fc1Col, b.fc2Col, b.fc3Col, b.fc4Col, b.fc5Col, b.fc6Col)
+        val dayViews = listOf(b.fc1Day, b.fc2Day, b.fc3Day, b.fc4Day, b.fc5Day, b.fc6Day)
+        val iconViews = listOf(b.fc1Icon, b.fc2Icon, b.fc3Icon, b.fc4Icon, b.fc5Icon, b.fc6Icon)
+        val maxViews = listOf(b.fc1Max, b.fc2Max, b.fc3Max, b.fc4Max, b.fc5Max, b.fc6Max)
+        val minViews = listOf(b.fc1Min, b.fc2Min, b.fc3Min, b.fc4Min, b.fc5Min, b.fc6Min)
+        b.ssForecastRow.visibility = if (days.isEmpty()) View.GONE else View.VISIBLE
+        for (i in containers.indices) {
+            val day = days.getOrNull(i)
+            containers[i].visibility = if (day == null) View.GONE else View.VISIBLE
+            if (day != null) {
+                dayViews[i].text = day.label
+                iconViews[i].text = day.emoji
+                maxViews[i].text = "${day.maxC}°"
+                minViews[i].text = "${day.minC}°"
+            }
+        }
     }
 
     private fun formatDate(epochMs: Long, tz: TimeZone): String {

@@ -118,7 +118,7 @@ object WeatherProvider {
      */
     private fun fetchGeo(): Geo? {
         try {
-            val geo = fetchJson("http://ip-api.com/json/")
+            val geo = fetchJson("http://ip-api.com/json/?lang=ru")
             if (geo != null && geo.optString("status") == "success") {
                 val city = geo.optString("city").ifBlank { geo.optString("regionName") }
                 val tz = geo.optString("timezone").ifBlank { null }
