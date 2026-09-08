@@ -1,6 +1,8 @@
 package com.tvcast.receiver
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -41,10 +43,23 @@ data class DayForecast(val label: String, val emoji: String, val maxC: Int, val 
 object WeatherProvider {
     private const val TAG = "WeatherProvider"
 
-    /** @param forecastDays 1 for just today's current conditions, 7 for a week-ahead outlook too. */
-    suspend fun fetch(forecastDays: Int = 1): WeatherInfo? {
-        return try {
-            val geo = fetchGeo() ?: return null
+    /**
+     * @param forecastDays 1 for just today's current conditions, 7 for a week-ahead outlook too.
+     *
+     * The actual network I/O (fetchGeo()/fetchJson()) is blocking
+     * (HttpURLConnection), so it must never run on the caller's own
+     * dispatcher -- MainActivity's clock/weather loop calls this via a plain
+     * lifecycleScope.launch, which defaults to the *main* thread. Without
+     * this withContext, every single call would throw
+     * NetworkOnMainThreadException (Android forbids blocking sockets on the
+     * main thread outright, unconditionally, on every real device), get
+     * swallowed by the catch below, and silently return null forever --
+     * which is exactly the "weather never shows up, on any network" reports
+     * this turned out to be the whole time.
+     */
+    suspend fun fetch(forecastDays: Int = 1): WeatherInfo? = withContext(Dispatchers.IO) {
+        try {
+            val geo = fetchGeo() ?: return@withContext null
 
             var url = "https://api.open-meteo.com/v1/forecast" +
                 "?latitude=${geo.lat}&longitude=${geo.lon}&current_weather=true"
@@ -52,7 +67,7 @@ object WeatherProvider {
                 url += "&daily=weathercode,temperature_2m_max,temperature_2m_min" +
                     "&forecast_days=$forecastDays&timezone=auto"
             }
-            val wx = fetchJson(url) ?: return null
+            val wx = fetchJson(url) ?: return@withContext null
             val cw = wx.getJSONObject("current_weather")
             val temp = cw.getDouble("temperature")
             val code = cw.getInt("weathercode")

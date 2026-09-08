@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
                 launch { CastState.serverUrl.collect { renderIdleInfo() } }
                 launch { CastState.lastError.collect { renderIdleInfo() } }
                 launch { CastState.items.collect { renderIdleInfo() } }
+                launch { CastState.connectedClients.collect { renderIdleInfo() } }
                 launch { CastState.musicEnabled.collect { onMusicSettingChanged() } }
                 launch { CastState.musicCategory.collect { onMusicSettingChanged() } }
                 launch { positionTicker() }
@@ -765,8 +766,11 @@ class MainActivity : AppCompatActivity() {
                 // length (e.g. AM/PM), so this keeps stopClockMotion()'s
                 // top-right anchor correct instead of drifting off-screen.
                 b.clockText.textSize = IDLE_CLOCK_SP
-                b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
                 if (clockMoveJob == null) parkAmbientInfo()
+                // Color, like size above, is meant to style the big
+                // screensaver clock the user actually asked to customize --
+                // the small idle-corner clock stays fixed white, same as its
+                // now-fixed size, instead of also reacting to this setting.
                 setTextIfChanged(b.ssClockText, clockText)
                 b.ssClockText.textSize = CastState.clockFontSize.value.toFloat()
                 b.ssClockText.setTextColor(parseClockColor(CastState.clockColor.value))
@@ -1068,8 +1072,18 @@ class MainActivity : AppCompatActivity() {
         }
         b.pinText.text = PinAuth.pin
         val err = CastState.lastError.value
+        // The idle screen used to look identical whether a phone was
+        // connected or not -- same QR/PIN prompt either way -- which is
+        // exactly what read as "unclear whether the connection actually
+        // went through". Showing the live client count here makes a
+        // successful connection visible without touching the phone again.
+        val connected = CastState.connectedClients.value > 0
         b.statusText.text = when {
             err.isNotBlank() -> err
+            connected && CastState.items.value.isEmpty() ->
+                "📱 Телефон подключён — отправьте первое фото или видео."
+            connected ->
+                "📱 Телефон подключён · файлов на телевизоре: ${CastState.items.value.size}"
             CastState.items.value.isEmpty() -> "Файлов пока нет — отправьте первые с телефона."
             else -> "Файлов на телевизоре: ${CastState.items.value.size}"
         }

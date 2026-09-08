@@ -214,6 +214,13 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                     // close()) ends the session and closes the connection --
                     // Ktor tears it down as soon as the handler coroutine returns.
                     if (!call.isAuthorized()) return@webSocket
+                    // The idle screen has no other way to know a phone is
+                    // actually connected -- it looks identical whether
+                    // nobody has ever scanned the QR code or someone's been
+                    // connected for an hour, which is exactly what read as
+                    // "unclear whether the connection exists". This count
+                    // drives a visible status line there instead.
+                    CastState.connectedClients.value++
                     val pusher = launch {
                         while (isActive) {
                             runCatching { send(Frame.Text(stateJson().toString())) }
@@ -232,6 +239,7 @@ class WebServer(private val context: Context, private val port: Int = PORT) {
                     } catch (_: Throwable) {
                     } finally {
                         pusher.cancel()
+                        CastState.connectedClients.value = (CastState.connectedClients.value - 1).coerceAtLeast(0)
                     }
                 }
             }

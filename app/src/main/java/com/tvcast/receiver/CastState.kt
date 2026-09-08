@@ -80,6 +80,8 @@ object CastState {
     val repeatOne = MutableStateFlow(false)
     val serverUrl = MutableStateFlow("")
     val lastError = MutableStateFlow("")
+    /** Open /ws sessions right now -- lets the idle screen show that a phone is actually connected. */
+    val connectedClients = MutableStateFlow(0)
 
     /** Сервер -> экран. */
     val commands = MutableSharedFlow<Command>(extraBufferCapacity = 64)
