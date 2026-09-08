@@ -41,7 +41,7 @@ main { padding: 16px; display: flex; flex-direction: column; gap: 14px; max-widt
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
 .card-title { font-size: 15px; font-weight: 650; color: var(--muted); margin-bottom: 12px; }
-.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
 .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
 
 .pick { display: flex; flex-direction: column; gap: 10px; }

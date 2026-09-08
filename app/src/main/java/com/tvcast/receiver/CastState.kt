@@ -66,7 +66,9 @@ object CastState {
     val musicCategory = MutableStateFlow("calm")
     /** "digital24" | "digital12" | "seconds" -- see MainActivity.formatClock(). */
     val clockStyle = MutableStateFlow("digital24")
-    val clockFontSize = MutableStateFlow(28)
+    /** Size (sp) of the big clock on the screensaver -- see MainActivity's ssClockText. The
+     *  small idle-screen corner clock has its own fixed size, not user-configurable. */
+    val clockFontSize = MutableStateFlow(96)
     val clockColor = MutableStateFlow("#FFFFFF")
     /** "bounce" | "orbit" | "wander" | "drift" | "lissajous" -- see MainActivity's clock motion functions. */
     val clockMotionStyle = MutableStateFlow("bounce")

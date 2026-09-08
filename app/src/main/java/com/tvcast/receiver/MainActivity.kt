@@ -116,7 +116,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val IDLE_TIMEOUT_MS = 3 * 60_000L
-        private const val SCREENSAVER_INTERVAL_MS = 8_000L
+        private const val IDLE_CLOCK_SP = 28f
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
         private const val WEATHER_RETRY_MS = 60_000L
@@ -143,6 +143,11 @@ class MainActivity : AppCompatActivity() {
         setupAirPlay()
         showIdle()
         startAmbientUpdaters()
+
+        b.tvHomeBtn.setOnClickListener {
+            handle(Command.Stop)
+            hideTvMenu()
+        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -574,45 +579,23 @@ class MainActivity : AppCompatActivity() {
     private fun startScreensaver() {
         if (screensaverActive || mirroring || CastState.currentId.value != null) return
         screensaverActive = true
-        val photos = CastState.items.value.filter { !it.isVideo }
-        if (photos.isEmpty()) {
-            // Пустая библиотека -- вместо просто чёрного экрана показываем
-            // отдельный, крупно и красиво оформленный блок часов+даты+
-            // погоды (screensaverAmbient), а не мелкие часы с экрана
-            // ожидания (ambientInfo) -- те гасим вместе с idleView.
-            b.idleView.animate().alpha(0f).setDuration(1500).start()
-            b.ambientInfo.animate().alpha(0f).setDuration(1500).start()
-            renderWeatherViews(lastWeatherInfo)
-            b.screensaverAmbient.alpha = 0f
-            b.screensaverAmbient.translationX = 0f
-            b.screensaverAmbient.translationY = 0f
-            b.screensaverAmbient.visibility = View.VISIBLE
-            b.screensaverAmbient.animate().alpha(1f).setDuration(1500).start()
-            startClockMotion(b.screensaverAmbient)
-            return
-        }
-        b.idleView.visibility = View.GONE
-        b.screensaverAmbient.visibility = View.GONE
-        // На обычном экране ожидания часы стоят на месте (не мешают QR/PIN),
-        // а бегать по экрану начинают только здесь: в скринсейвере под ними
-        // долго крутятся фото, и без движения именно часы стали бы тем,
-        // что выжигает панель на длинной дистанции.
-        b.ambientInfo.visibility = View.VISIBLE
-        startClockMotion(b.ambientInfo)
+        // Заставка по бездействию -- всегда просто чёрный экран с крупными
+        // часами/датой/погодой (screensaverAmbient), независимо от того,
+        // пуста библиотека или нет. Раньше при непустой библиотеке этот же
+        // путь вместо этого молча запускал бесконечную ротацию фото на весь
+        // экран -- пользователь это не включал и не просил; показ фото по
+        // расписанию — отдельная, явно включаемая функция ("Слайдшоу" в
+        // настройках, см. restartSlideshow()), к простою она не привязана.
+        b.idleView.animate().alpha(0f).setDuration(1500).start()
+        b.ambientInfo.animate().alpha(0f).setDuration(1500).start()
+        renderWeatherViews(lastWeatherInfo)
+        b.screensaverAmbient.alpha = 0f
+        b.screensaverAmbient.translationX = 0f
+        b.screensaverAmbient.translationY = 0f
+        b.screensaverAmbient.visibility = View.VISIBLE
+        b.screensaverAmbient.animate().alpha(1f).setDuration(1500).start()
+        startClockMotion(b.screensaverAmbient)
         startBackgroundMusic()
-        screensaverJob = lifecycleScope.launch {
-            var idx = 0
-            while (true) {
-                val entry = photos[idx % photos.size]
-                val file = MediaRepo.fileOf(entry.id)
-                if (file != null) {
-                    val bmp = withContext(Dispatchers.IO) { decodePhoto(file) }
-                    if (bmp != null) showPhotoWithTransition(bmp)
-                }
-                idx++
-                delay(SCREENSAVER_INTERVAL_MS)
-            }
-        }
     }
 
     private fun exitScreensaver() {
@@ -621,6 +604,85 @@ class MainActivity : AppCompatActivity() {
         screensaverJob?.cancel()
         screensaverJob = null
         showIdle()
+    }
+
+    // ------------------------------------------------------- меню на ТВ
+
+    /**
+     * Полноэкранное меню, открываемое прямо с пульта (кнопка Menu, или ОК на
+     * экране ожидания) -- позволяет выбрать любое конкретное фото/видео и
+     * остановить показ/повтор экрана без необходимости брать телефон.
+     */
+    private fun showTvMenu() {
+        if (screensaverActive) exitScreensaver()
+        disarmIdleTimeout()
+        populateTvMenuGrid()
+        val active = CastState.currentId.value != null || mirroring
+        b.tvHomeBtn.visibility = if (active) View.VISIBLE else View.GONE
+        b.tvMenu.alpha = 0f
+        b.tvMenu.visibility = View.VISIBLE
+        b.tvMenu.animate().alpha(1f).setDuration(200).start()
+        b.tvMenu.post {
+            val target = if (active) b.tvHomeBtn else b.tvMenuGrid.getChildAt(0)
+            (target ?: b.tvMenu).requestFocus()
+        }
+    }
+
+    private fun hideTvMenu() {
+        b.tvMenu.animate().alpha(0f).setDuration(150)
+            .withEndAction { b.tvMenu.visibility = View.GONE }
+            .start()
+        if (b.idleView.visibility == View.VISIBLE) armIdleTimeout()
+    }
+
+    /** Newest-first thumbnail strip, same order as the phone's own gallery grid. */
+    private fun populateTvMenuGrid() {
+        val grid = b.tvMenuGrid
+        grid.removeAllViews()
+        val items = CastState.items.value.asReversed()
+        b.tvMenuEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        val density = resources.displayMetrics.density
+        val tileSize = (160 * density).toInt()
+        val margin = (8 * density).toInt()
+        for (entry in items) {
+            val img = ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(tileSize, tileSize)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFF1E242C.toInt())
+            }
+            val badge = android.widget.TextView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply { gravity = Gravity.BOTTOM or Gravity.START; setMargins(margin, 0, 0, margin) }
+                text = if (entry.isVideo) "▶ видео" else "фото"
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 11f
+                setBackgroundColor(0xA6000000.toInt())
+                setPadding(margin / 2, margin / 4, margin / 2, margin / 4)
+            }
+            val tile = FrameLayout(this).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(tileSize, tileSize).apply {
+                    marginEnd = margin * 2
+                }
+                isFocusable = true
+                isFocusableInTouchMode = false
+                foreground = androidx.core.content.ContextCompat.getDrawable(
+                    this@MainActivity, R.drawable.tv_tile_focus_bg
+                )
+                addView(img)
+                addView(badge)
+                setOnClickListener {
+                    handle(Command.Show(entry.id))
+                    hideTvMenu()
+                }
+            }
+            grid.addView(tile)
+            lifecycleScope.launch(Dispatchers.IO) {
+                val bmp = MediaRepo.thumbnail(entry.id)?.let { BitmapFactory.decodeFile(it.path) }
+                if (bmp != null) withContext(Dispatchers.Main) { img.setImageBitmap(bmp) }
+            }
+        }
     }
 
     // -------------------------------------------------------- фоновая музыка
@@ -668,7 +730,7 @@ class MainActivity : AppCompatActivity() {
     private fun onMusicSettingChanged() {
         if (!CastState.musicEnabled.value) { stopBackgroundMusic(); return }
         val photoActive = (CastState.currentId.value != null && CastState.current()?.isVideo == false) ||
-            (screensaverActive && screensaverJob != null)
+            screensaverActive
         if (photoActive) startBackgroundMusic()
     }
 
@@ -692,14 +754,22 @@ class MainActivity : AppCompatActivity() {
                 val tz = resolvedTimeZone ?: TimeZone.getDefault()
                 val clockText = formatClock(nowMs, CastState.clockStyle.value, tz)
                 setTextIfChanged(b.clockText, clockText)
-                b.clockText.textSize = CastState.clockFontSize.value.toFloat()
+                // The small idle-corner clock keeps its own fixed size --
+                // the user's size setting targets the big screensaver clock
+                // below instead (that's the one actually meant to be read
+                // from across the room). Re-anchoring on every tick (rather
+                // than only once when the screen is entered) matters because
+                // this size can change live while already parked here: the
+                // corner clock's own font size never changes, but its width
+                // still does when the color/style change alters string
+                // length (e.g. AM/PM), so this keeps stopClockMotion()'s
+                // top-right anchor correct instead of drifting off-screen.
+                b.clockText.textSize = IDLE_CLOCK_SP
                 b.clockText.setTextColor(parseClockColor(CastState.clockColor.value))
-                // The big screensaver clock always uses its own large fixed
-                // size/color -- deliberately not the user's small idle-clock
-                // preference, since this display is meant to be a striking
-                // ambient screen on its own, not a bigger copy of the corner
-                // clock.
+                if (clockMoveJob == null) parkAmbientInfo()
                 setTextIfChanged(b.ssClockText, clockText)
+                b.ssClockText.textSize = CastState.clockFontSize.value.toFloat()
+                b.ssClockText.setTextColor(parseClockColor(CastState.clockColor.value))
                 // Re-setting a TextView's text to an equal-content but new
                 // String instance every second (formatDate() always returns
                 // a fresh String) was making a specific letter pair visibly
@@ -834,6 +904,19 @@ class MainActivity : AppCompatActivity() {
         bounceInited = false
         wanderInited = false
         clockMotionStarted = false
+        parkAmbientInfo()
+    }
+
+    /**
+     * Anchors ambientInfo's top-right corner to the screen's top-right corner
+     * (with CLOCK_EDGE_INSET_DP of padding). Not a one-shot: called again on
+     * every clock tick while parked (see startAmbientUpdaters()) because the
+     * view's own width can change under it -- a translationX computed for an
+     * old, narrower width would leave the right edge hanging past the screen
+     * edge once the view grows, which is exactly what a stale single call
+     * looked like.
+     */
+    private fun parkAmbientInfo() {
         b.ambientInfo.post {
             val density = resources.displayMetrics.density
             val insetPx = CLOCK_EDGE_INSET_DP * density
@@ -1079,13 +1162,30 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------ пульт от ТВ
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Меню на ТВ открыто -- отдаём стрелки/ОК стандартной навигации
+        // фокуса Android (меню собрано из обычных View, этого достаточно),
+        // и сами обрабатываем только "Назад", чтобы закрыть его.
+        if (b.tvMenu.visibility == View.VISIBLE) {
+            if (keyCode == KeyEvent.KEYCODE_BACK) { hideTvMenu(); return true }
+            return super.onKeyDown(keyCode, event)
+        }
         if (screensaverActive) {
             exitScreensaver()
             return true
         }
+        if (keyCode == KeyEvent.KEYCODE_MENU) {
+            showTvMenu()
+            return true
+        }
         val idle = b.idleView.visibility == View.VISIBLE
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                // На экране ожидания ОК раньше не делал вообще ничего --
+                // теперь открывает галерею, чтобы выбрать конкретное фото
+                // с пульта без телефона.
+                if (!idle) handle(Command.Toggle) else showTvMenu()
+                return true
+            }
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                 if (!idle) { handle(Command.Toggle); return true }
             }

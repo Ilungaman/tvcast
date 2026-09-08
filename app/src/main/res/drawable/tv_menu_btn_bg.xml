@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Кнопка меню на ТВ: выделяется рамкой при фокусе с пульта (D-pad),
+     а не цветом фона: так белый текст остаётся читаемым в обоих
+     состояниях. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#2A323C" />
+            <stroke android:width="3dp" android:color="#4FC3F7" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#26FFFFFF" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</selector>
