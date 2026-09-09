@@ -37,6 +37,10 @@
 <main>
 
   <section class="card pick">
+    <div class="row">
+      <button class="chip" id="captionsChip" data-act="captions">Подписи выкл.</button>
+    </div>
+    <p class="hint">Когда включено, ниже можно указать «от кого» — подпись покажется на экране вместо имени файла.</p>
     <input id="captionInput" type="text" maxlength="200" placeholder="От кого (необязательно)" hidden>
     <label class="btn primary">
       Фото и видео
@@ -133,10 +137,6 @@
       </label>
     </div>
     <p class="hint">«По времени» удаляет файлы старше указанного числа дней. «По количеству» оставляет только последние N файлов, остальные стираются автоматически.</p>
-    <div class="row">
-      <button class="chip" id="captionsChip" data-act="captions">Подписи выкл.</button>
-    </div>
-    <p class="hint">Когда включено, при отправке фото можно указать «от кого» — подпись покажется на экране вместо имени файла.</p>
     <button class="chip danger" id="clearBtn">Очистить всё сейчас</button>
   </section>
 
@@ -169,8 +169,8 @@
       <label class="interval">
         Движение
         <select id="clockMotion">
-          <option value="none">Без движения</option>
-          <option value="bounce" selected>Отскок (как DVD)</option>
+          <option value="none" selected>Без движения</option>
+          <option value="bounce">Отскок (как DVD)</option>
           <option value="orbit">По кругу</option>
           <option value="wander">Случайные точки</option>
           <option value="drift">Лёгкое дрожание</option>

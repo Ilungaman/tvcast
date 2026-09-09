@@ -105,7 +105,13 @@
       $('nowName').textContent = cur.name;
       $('nowSub').textContent = (cur.isVideo ? 'Видео' : 'Фото') + ' · ' + fmtSize(cur.size) +
         (cur.caption ? ' · подпись: «' + cur.caption + '»' : '');
-      $('playBtn').textContent = s.playing ? '❚❚' : '▶';
+      // For a video this is real play/pause state; for a photo, pressing
+      // this button actually starts/stops the slideshow auto-advance (see
+      // Command.Toggle server-side) -- it was always doing that, but stayed
+      // stuck on "▶" forever afterward since it only ever reflected video
+      // playback state, never s.slideshow, which read as the button simply
+      // not working.
+      $('playBtn').textContent = (cur.isVideo ? s.playing : s.slideshow) ? '❚❚' : '▶';
       $('seekWrap').style.display = cur.isVideo && s.duration > 0 ? '' : 'none';
       if (!seeking && s.duration > 0) {
         $('seek').value = String(Math.round(s.position / s.duration * 1000));
@@ -183,6 +189,7 @@
       del.setAttribute('aria-label', 'Удалить');
       del.onclick = function (e) {
         e.stopPropagation();
+        if (!confirm('Удалить этот файл с телевизора?')) return;
         cmd({ action: 'delete', id: it.id });
         lastGridKey = '';
       };

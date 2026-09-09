@@ -70,8 +70,17 @@ object CastState {
      *  small idle-screen corner clock has its own fixed size, not user-configurable. */
     val clockFontSize = MutableStateFlow(96)
     val clockColor = MutableStateFlow("#FFFFFF")
-    /** "bounce" | "orbit" | "wander" | "drift" | "lissajous" -- see MainActivity's clock motion functions. */
-    val clockMotionStyle = MutableStateFlow("bounce")
+    /**
+     * "none" | "bounce" | "orbit" | "wander" | "drift" | "lissajous" -- see
+     * MainActivity's clock motion functions. Defaults to static: repeated
+     * reports of the screensaver's clock/date/weather column "trembling"
+     * survived two real relayout-bug fixes, which points at the constant
+     * anti-burn-in creep itself (however slow) reading as unwanted motion
+     * once the block grew large (weather + the week forecast row) -- static
+     * removes that outright for anyone who hasn't deliberately picked a
+     * motion style, while still leaving every style available to opt into.
+     */
+    val clockMotionStyle = MutableStateFlow("none")
     /** On by default -- shows city/temperature on the idle and screensaver screens. */
     val weatherEnabled = MutableStateFlow(true)
     /** "1" | "7" -- how many days ahead the forecast row on screen covers. */

@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         private const val WEATHER_REFRESH_MS = 30 * 60_000L
         private const val AIRPLAY_WARMUP_MS = 1800L
         private const val WEATHER_RETRY_MS = 60_000L
+        private const val WEATHER_POLL_MS = 1000L
         private const val CLOCK_TICK_MS = 33L
         private const val CLOCK_SPEED_DP_PER_SEC = 14f
         private const val CLOCK_EDGE_INSET_DP = 24f
@@ -401,7 +402,8 @@ class MainActivity : AppCompatActivity() {
         b.ambientInfo.visibility = View.GONE
         b.airplaySurface.visibility = View.GONE
         val caption = entry.caption
-        showTitle(if (CastState.captionsEnabled.value && caption.isNotBlank()) caption else entry.name)
+        val hasCaption = CastState.captionsEnabled.value && caption.isNotBlank()
+        showTitle(if (hasCaption) caption else entry.name, persistent = hasCaption)
 
         if (entry.isVideo) {
             stopBackgroundMusic()
@@ -831,25 +833,40 @@ class MainActivity : AppCompatActivity() {
         weatherJob?.cancel()
         weatherJob = lifecycleScope.launch {
             while (true) {
+                var targetDelay: Long
                 if (!CastState.weatherEnabled.value) {
                     lastWeatherInfo = null
                     renderWeatherViews(null)
-                    delay(WEATHER_RETRY_MS)
-                    continue
-                }
-                val info = WeatherProvider.fetch(CastState.weatherForecastDays.value)
-                lastWeatherInfo = info
-                info?.timeZoneId?.let { id ->
-                    try { resolvedTimeZone = TimeZone.getTimeZone(id) } catch (t: Throwable) { /* keep previous */ }
-                }
-                renderWeatherViews(info)
-                if (info != null) {
-                    delay(WEATHER_REFRESH_MS)
+                    targetDelay = WEATHER_RETRY_MS
                 } else {
+                    val info = WeatherProvider.fetch(CastState.weatherForecastDays.value)
+                    lastWeatherInfo = info
+                    info?.timeZoneId?.let { id ->
+                        try { resolvedTimeZone = TimeZone.getTimeZone(id) } catch (t: Throwable) { /* keep previous */ }
+                    }
+                    renderWeatherViews(info)
                     // A transient failure right at boot (Wi-Fi/DNS not fully
                     // up yet) would otherwise mean no weather for a full 30
                     // minutes -- retry much sooner instead.
-                    delay(WEATHER_RETRY_MS)
+                    targetDelay = if (info != null) WEATHER_REFRESH_MS else WEATHER_RETRY_MS
+                }
+                // Waiting out the full delay with a single delay() call
+                // meant flipping the weather toggle or switching "today" to
+                // "week" could silently take up to 30 minutes to actually
+                // take effect -- the setting was saved immediately, but
+                // nothing re-fetched until the current wait finished, which
+                // read as "the week forecast only shows one day". Polling in
+                // short slices and breaking out the moment either setting
+                // changes makes it react within about a second instead.
+                val enabledAtStart = CastState.weatherEnabled.value
+                val daysAtStart = CastState.weatherForecastDays.value
+                var waited = 0L
+                while (waited < targetDelay) {
+                    delay(WEATHER_POLL_MS)
+                    waited += WEATHER_POLL_MS
+                    if (CastState.weatherEnabled.value != enabledAtStart ||
+                        CastState.weatherForecastDays.value != daysAtStart
+                    ) break
                 }
             }
         }
@@ -1153,12 +1170,23 @@ class MainActivity : AppCompatActivity() {
         if (qrBmp != null) b.qrView.setImageBitmap(qrBmp) else b.qrView.setImageDrawable(null)
     }
 
-    private fun showTitle(name: String) {
+    /**
+     * @param persistent Filenames flash briefly, same as always -- but a
+     * caption is content someone deliberately wrote to go with this photo,
+     * not incidental metadata, and a 2.9-second flash was too easy to miss
+     * entirely (looking at the phone while uploading, not the TV) for
+     * anyone to reliably confirm it actually applied. Kept on screen for as
+     * long as this photo is, instead.
+     */
+    private fun showTitle(name: String, persistent: Boolean = false) {
+        b.titleOverlay.animate().cancel()
         b.titleOverlay.text = name
         b.titleOverlay.visibility = View.VISIBLE
         b.titleOverlay.alpha = 1f
-        b.titleOverlay.animate().setStartDelay(2500).alpha(0f).setDuration(400)
-            .withEndAction { b.titleOverlay.visibility = View.GONE }.start()
+        if (!persistent) {
+            b.titleOverlay.animate().setStartDelay(2500).alpha(0f).setDuration(400)
+                .withEndAction { b.titleOverlay.visibility = View.GONE }.start()
+        }
     }
 
     private fun toast(text: String) {
